@@ -52,12 +52,21 @@ export function registerWikiTools(server: McpServer): void {
         .describe("是否过滤 Template/Module/Widget 等技术命名空间页面，默认 true。"),
     },
     async ({ query, limit, search_mode, filter_technical }) => {
-      const result = await searchWiki(
-        query,
-        limit,
-        search_mode,
-        filter_technical,
-      );
+      let result;
+      try {
+        result = await searchWiki(
+          query,
+          limit,
+          search_mode,
+          filter_technical,
+        );
+      } catch (e) {
+        return {
+          content: [
+            { type: "text", text: e instanceof Error ? e.message : String(e) },
+          ],
+        };
+      }
       if (result.results.length === 0) {
         return {
           content: [{ type: "text", text: `No pages matched '${query}'.` }],
