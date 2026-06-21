@@ -1,0 +1,98 @@
+#!/usr/bin/env bun
+/**
+ * EndField-MCP server entry point.
+ *
+ * Creates the McpServer instance, binds the wiki client to the loaded
+ * config, registers tools, then dispatches to the transport selected by
+ * EF_TRANSPORT:
+ *
+ *   stdio (default) — for local Claude Desktop / Claude Code / Chatbox
+ *   http            — stateless Streamable HTTP via Bun.serve (remote use)
+ *
+ * One TS implementation covers both transports (the historical reason
+ * PRTS-MCP needed a second TS implementation alongside Python — asyncio
+ * friction with Streamable HTTP — does not apply when the runtime is
+ * already Bun/TS end-to-end).
+ */
+
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { loadConfig } from "./config.js";
+import { bindWikiConfig } from "./api/endfieldWiki.js";
+import { registerWikiTools } from "./tools/wikiTools.js";
+import { runStartupSync } from "./startupSync.js";
+import { runStdio } from "./transports/stdio.js";
+import { runHttp } from "./transports/http.js";
+
+// ---------------------------------------------------------------------------
+// Logging + version
+// ---------------------------------------------------------------------------
+
+const SERVER_NAME = "Endfield_Wiki_Assistant";
+const SERVER_VERSION = "0.1.0-dev.0";
+
+function log(level: "INFO" | "WARN" | "ERROR", msg: string): void {
+  const ts = new Date().toISOString();
+  process.stderr.write(`${ts} ${level} ef.server: ${msg}\n`);
+}
+
+// ---------------------------------------------------------------------------
+// MCP Server factory
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a configured McpServer with all tools registered.
+ *
+ * Wiki client binding happens once per process at startup; the client
+ * reads its endpoint/UA/Referer from that binding, so per-request server
+ * instances (HTTP transport creates one per request) all share the same
+ * wiki config snapshot.
+ */
+function createMcpServer(): McpServer {
+  const server = new McpServer({
+    name: SERVER_NAME,
+    version: SERVER_VERSION,
+  });
+  registerWikiTools(server);
+  // v0.2 will add: registerGameDataTools(server);
+  return server;
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const cfg = loadConfig();
+  bindWikiConfig(cfg);
+
+  log(
+    "INFO",
+    `EndField-MCP ${SERVER_VERSION} starting (transport=${cfg.transport}, wiki=${cfg.wikiEndpoint})`,
+  );
+
+  // Fire-and-forget. In v0.1 this is a no-op; in v0.2+ the background
+  // thread handles mirror sync without blocking server startup.
+  void runStartupSync().catch((err: unknown) => {
+    log(
+      "ERROR",
+      `Startup sync threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  });
+
+  if (cfg.transport === "http") {
+    await runHttp(createMcpServer, {
+      port: cfg.httpPort,
+      host: cfg.httpHost,
+    });
+  } else {
+    await runStdio(createMcpServer());
+  }
+}
+
+main().catch((err: unknown) => {
+  log(
+    "ERROR",
+    `Fatal: ${err instanceof Error ? err.message : String(err)}`,
+  );
+  process.exit(1);
+});

@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output
+dist/
+**/dist/
+*.tsbuildinfo
+
+# Runtime data (auto-synced from GitHub Releases or user-provided)
+data/gamedata/
+data/gamedata-levels/
+data/storyjson/
+ts/data/gamedata/
+ts/data/gamedata-levels/
+ts/data/storyjson/
+
+# Local development scratch
+# /dev/ is anchored to repo root so it does NOT match docs/dev/ (developer docs).
+/dev/
+scratch/
+tmp/
+*.log
+
+# Test caches
+.pytest_cache/
+.bun-test-cache/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Env files (keep examples)
+.env
+.env.local
+.mcp.json
+
+# Release archives prepared locally
+*.tar

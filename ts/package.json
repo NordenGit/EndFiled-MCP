@@ -1,0 +1,55 @@
+{
+  "name": "endfield-mcp",
+  "version": "0.1.0-dev.0",
+  "description": "MCP Server for Arknights: Endfield (TypeScript / stdio + Streamable HTTP)",
+  "type": "module",
+  "main": "dist/server.js",
+  "bin": {
+    "endfield-mcp": "./dist/server.js"
+  },
+  "files": [
+    "dist/",
+    "data/"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "bun run src/server.ts",
+    "start": "bun run dist/server.js",
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/3aKHP/EndFiled-MCP.git",
+    "directory": "ts"
+  },
+  "homepage": "https://github.com/3aKHP/EndFiled-MCP",
+  "bugs": "https://github.com/3aKHP/EndFiled-MCP/issues",
+  "license": "MIT",
+  "keywords": [
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "arknights",
+    "endfield",
+    "arknights-endfield",
+    "game-data",
+    "claude",
+    "anthropic",
+    "fanfiction",
+    "ai-agent",
+    "streamable-http",
+    "bun"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "adm-zip": "^0.5.16",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/bun": "^1.2.0",
+    "typescript": "^5.8.0"
+  }
+}
