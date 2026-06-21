@@ -1,0 +1,557 @@
+/**
+ * GitHub-backed data sync for EndField-MCP.
+ *
+ * Mirrors the design of PRTS-MCP's `ts/src/data/sync.ts` — the same proven
+ * decision tree, cascade fallback, and atomic-write semantics. The only
+ * Endfield-specific parts are the User-Agent and the absence of the
+ * `upstream-<sha>` tag convention (our mirror uses plain semver tags, so
+ * commitSha === tag verbatim).
+ *
+ * Contract:
+ * - Downloads GitHub Release zip assets only when the release tag changes.
+ * - Skips the upstream API call entirely when cached data is fresher than
+ *   CACHE_TTL_SECONDS (avoids burning GitHub anonymous quota on every start).
+ * - Falls back gracefully to cached data when the network is unavailable,
+ *   and to "no data" only when neither cache nor network can provide.
+ * - All writes are write-to-tmp-then-rename for crash safety.
+ */
+
+import { existsSync, statSync } from "node:fs";
+import {
+  mkdir,
+  readFile,
+  rename,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
+import AdmZip from "adm-zip";
+import { parseMirrors } from "../config.js";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+const GITHUB_UA = "EndField-MCP-Bot/0.1 (Arknights: Endfield fan-creation helper)";
+
+/** Skip the upstream tag check if cached data is fresher than this (seconds). */
+const CACHE_TTL_SECONDS = 3600;
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Describes an upstream GitHub repository and the files required from it. */
+export interface RepoSpec {
+  owner: string;
+  repo: string;
+  branch: string;
+  files: readonly string[];
+  /** Absolute path to the local directory where files are written. */
+  localRoot: string;
+}
+
+/** Persisted metadata about the last successful sync. */
+interface CacheMeta {
+  repo: string;
+  branch: string;
+  commitSha: string;
+  /** ISO 8601 UTC timestamp, e.g. "2025-01-01T00:00:00.000Z". */
+  fetchedAt: string;
+  files: string[];
+}
+
+export type SyncStatus =
+  | "updated"
+  | "up_to_date"
+  | "offline_fallback"
+  | "no_data";
+
+export interface SyncResult {
+  spec: RepoSpec;
+  status: SyncStatus;
+  commitSha: string | null;
+  error: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+function githubHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "User-Agent": GITHUB_UA };
+  const token = process.env["GITHUB_TOKEN"];
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return headers;
+}
+
+/**
+ * Return mirror URLs parsed from GITHUB_MIRRORS env var.
+ * Delegates to config.ts:parseMirrors to keep parsing in one place.
+ * Mirror URL format (ghproxy-style): `<mirror>/<original_url>`.
+ */
+function mirrorUrls(): string[] {
+  return parseMirrors(process.env["GITHUB_MIRRORS"] ?? "");
+}
+
+/** Return `[url, mirroredUrl1, mirroredUrl2, ...]`. */
+function urlCandidates(url: string): string[] {
+  return [url, ...mirrorUrls().map((m) => `${m}/${url}`)];
+}
+
+/**
+ * fetch() wrapper that cascades through URL candidates on failure.
+ *
+ * - A fresh AbortSignal.timeout is created per attempt so an earlier timeout
+ *   does not consume the budget for later candidates.
+ * - HTTP 4xx from the direct URL propagates immediately (resource is
+ *   genuinely missing — mirrors won't help).
+ * - Network error or HTTP 5xx from any candidate → try the next one.
+ */
+async function fetchCascading(
+  url: string,
+  options: Omit<RequestInit, "signal">,
+  timeoutMs: number,
+): Promise<Response> {
+  const candidates = urlCandidates(url);
+  let lastErr: unknown = new Error("All URL candidates failed");
+  for (let i = 0; i < candidates.length; i++) {
+    try {
+      const res = await fetch(candidates[i], {
+        ...options,
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+      if (res.ok) return res;
+      lastErr = new Error(`HTTP ${res.status}`);
+      // Direct 4xx → resource does not exist; mirrors cannot help.
+      if (i === 0 && res.status >= 400 && res.status < 500) break;
+    } catch (err) {
+      lastErr = err;
+    }
+  }
+  throw lastErr;
+}
+
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function cacheIsFresh(cache: CacheMeta): boolean {
+  try {
+    const ageMs = Date.now() - new Date(cache.fetchedAt).getTime();
+    return ageMs < CACHE_TTL_SECONDS * 1000;
+  } catch {
+    return false;
+  }
+}
+
+function releaseZipError(spec: ReleaseSpec): string | null {
+  if (!existsSync(spec.localZip)) return "zip file is missing";
+  try {
+    const missing = spec.validateZip?.(spec.localZip) ?? [];
+    if (missing.length === 0) return null;
+    return missing.slice(0, 10).join("; ");
+  } catch (err) {
+    return `${basename(spec.localZip)} is not a valid zip: ${errorMessage(err)}`;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Release-based sync
+// ---------------------------------------------------------------------------
+
+const GITHUB_RELEASES_LATEST_URL =
+  "https://api.github.com/repos/{owner}/{repo}/releases/latest";
+
+/** Describes a GitHub Release asset to download as a local zip. */
+export interface ReleaseSpec {
+  owner: string;
+  repo: string;
+  /** Asset filename in the release, e.g. "endfield-tables.zip". */
+  assetName: string;
+  /** Absolute destination path for the downloaded zip. */
+  localZip: string;
+  /** Optional validator returning missing or invalid zip entries. */
+  validateZip?: (zipPath: string) => string[];
+}
+
+/** Describes a GitHub Release zip asset that should be extracted locally. */
+export interface ReleaseArchiveSpec {
+  owner: string;
+  repo: string;
+  assetName: string;
+  localZip: string;
+  localRoot: string;
+  requiredFiles: readonly string[];
+}
+
+function releaseCachePath(spec: ReleaseSpec): string {
+  return join(dirname(spec.localZip), "release_meta.json");
+}
+
+async function loadReleaseMeta(spec: ReleaseSpec): Promise<CacheMeta | null> {
+  try {
+    const text = await readFile(releaseCachePath(spec), "utf-8");
+    return JSON.parse(text) as CacheMeta;
+  } catch {
+    return null;
+  }
+}
+
+async function saveReleaseMeta(
+  spec: ReleaseSpec,
+  meta: CacheMeta,
+): Promise<void> {
+  const p = releaseCachePath(spec);
+  await mkdir(dirname(p), { recursive: true });
+  await writeFile(p, JSON.stringify(meta, null, 2), "utf-8");
+}
+
+/**
+ * Fetch the latest release tag and asset download URL.
+ * Returns null on any network or API failure.
+ */
+export async function checkLatestRelease(
+  spec: ReleaseSpec,
+  timeoutMs = 10_000,
+): Promise<{ tag: string; url: string } | null> {
+  const url = GITHUB_RELEASES_LATEST_URL.replace(
+    "{owner}",
+    spec.owner,
+  ).replace("{repo}", spec.repo);
+  try {
+    const res = await fetchCascading(
+      url,
+      { headers: githubHeaders() },
+      timeoutMs,
+    );
+    const data = (await res.json()) as {
+      tag_name: string;
+      assets: Array<{ name: string; browser_download_url: string }>;
+    };
+    const asset = data.assets.find((a) => a.name === spec.assetName);
+    if (!asset) return null;
+    return { tag: data.tag_name, url: asset.browser_download_url };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Download the release asset zip atomically, then write cache metadata.
+ * Uses write-to-tmp-then-rename for crash safety.
+ */
+export async function downloadReleaseAsset(
+  spec: ReleaseSpec,
+  tag: string,
+  assetUrl: string,
+  timeoutMs = 120_000,
+): Promise<void> {
+  const tmp = spec.localZip + ".tmp";
+  await mkdir(dirname(spec.localZip), { recursive: true });
+  try {
+    const res = await fetchCascading(
+      assetUrl,
+      { headers: githubHeaders(), redirect: "follow" },
+      timeoutMs,
+    ).catch((err: unknown) => {
+      throw new Error(`${errorMessage(err)} downloading ${spec.assetName}`);
+    });
+    await writeFile(tmp, Buffer.from(await res.arrayBuffer()));
+    const missing = spec.validateZip?.(tmp) ?? [];
+    if (missing.length > 0) {
+      throw new Error(
+        `Downloaded ${spec.assetName} is missing required entries: ${missing.join(", ")}`,
+      );
+    }
+    await rename(tmp, spec.localZip);
+
+    // Our mirror uses plain semver tags (v0.2.0) — commitSha === tag.
+    await saveReleaseMeta(spec, {
+      repo: `${spec.owner}/${spec.repo}`,
+      branch: "releases",
+      commitSha: tag,
+      fetchedAt: new Date().toISOString(),
+      files: [spec.assetName],
+    });
+  } catch (err) {
+    try {
+      await unlink(tmp);
+    } catch {
+      // best-effort cleanup
+    }
+    throw err;
+  }
+}
+
+/**
+ * Check latest GitHub Release and download the zip if the tag has changed.
+ *
+ * Decision tree:
+ *   1. Cache fresh AND zip exists → up_to_date (skip API call).
+ *   2. Network failure → offline_fallback (zip exists) / no_data (no zip).
+ *   3. Tag unchanged AND zip exists → up_to_date (refresh fetchedAt).
+ *   4. Tag changed or zip missing → downloadReleaseAsset → updated / fallback.
+ */
+export async function syncRelease(spec: ReleaseSpec): Promise<SyncResult> {
+  const dummySpec: RepoSpec = {
+    owner: spec.owner,
+    repo: spec.repo,
+    branch: "releases",
+    files: [spec.assetName],
+    localRoot: dirname(spec.localZip),
+  };
+
+  const cache = await loadReleaseMeta(spec);
+  const zipError = releaseZipError(spec);
+  const zipOk = zipError === null;
+
+  if (cache !== null && zipOk && cacheIsFresh(cache)) {
+    return {
+      spec: dummySpec,
+      status: "up_to_date",
+      commitSha: cache.commitSha,
+      error: null,
+    };
+  }
+
+  const latest = await checkLatestRelease(spec);
+
+  if (latest === null) {
+    if (zipOk) {
+      return {
+        spec: dummySpec,
+        status: "offline_fallback",
+        commitSha: cache?.commitSha ?? null,
+        error: "Network unavailable",
+      };
+    }
+    // No zip and API unreachable — attempt blind download via the
+    // releases/latest/download/ shortcut (no GitHub API call; ghproxy and
+    // similar mirrors support this URL pattern).
+    if (mirrorUrls().length > 0) {
+      const blindUrl = `https://github.com/${spec.owner}/${spec.repo}/releases/latest/download/${spec.assetName}`;
+      try {
+        await downloadReleaseAsset(spec, "unknown", blindUrl);
+        return {
+          spec: dummySpec,
+          status: "updated",
+          commitSha: "unknown",
+          error: null,
+        };
+      } catch (err) {
+        return {
+          spec: dummySpec,
+          status: "no_data",
+          commitSha: null,
+          error: errorMessage(err),
+        };
+      }
+    }
+    const error = existsSync(spec.localZip) && zipError
+      ? `Network unavailable and no cached zip; cached zip invalid: ${zipError}`
+      : "Network unavailable and no cached zip";
+    return { spec: dummySpec, status: "no_data", commitSha: null, error };
+  }
+
+  const commitSha = latest.tag;
+
+  if (cache !== null && cache.commitSha === commitSha && zipOk) {
+    await saveReleaseMeta(spec, {
+      ...cache,
+      fetchedAt: new Date().toISOString(),
+    });
+    return { spec: dummySpec, status: "up_to_date", commitSha, error: null };
+  }
+
+  try {
+    await downloadReleaseAsset(spec, latest.tag, latest.url);
+    return { spec: dummySpec, status: "updated", commitSha, error: null };
+  } catch (err) {
+    const error = errorMessage(err);
+    return zipOk
+      ? {
+          spec: dummySpec,
+          status: "offline_fallback",
+          commitSha: cache?.commitSha ?? null,
+          error,
+        }
+      : { spec: dummySpec, status: "no_data", commitSha: null, error };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Release-archive sync (download + extract)
+// ---------------------------------------------------------------------------
+
+function archiveFilesPresent(spec: ReleaseArchiveSpec): boolean {
+  return spec.requiredFiles.every((f) => {
+    const p = join(spec.localRoot, f);
+    return existsSync(p) && statSync(p).isFile();
+  });
+}
+
+function archiveMissingFiles(spec: ReleaseArchiveSpec): string[] {
+  return spec.requiredFiles.filter((f) => {
+    const p = join(spec.localRoot, f);
+    return !existsSync(p) || !statSync(p).isFile();
+  });
+}
+
+function validateArchiveZip(
+  zipPath: string,
+  requiredFiles: readonly string[],
+): string[] {
+  try {
+    const zip = new AdmZip(zipPath);
+    const entries = new Set(
+      zip
+        .getEntries()
+        .filter((entry) => !entry.isDirectory)
+        .map((entry) => entry.entryName),
+    );
+    return requiredFiles.filter((file) => !entries.has(file));
+  } catch (err) {
+    return [`${basename(zipPath)} is not a valid zip: ${errorMessage(err)}`];
+  }
+}
+
+async function safeExtractZip(
+  zipPath: string,
+  localRoot: string,
+): Promise<void> {
+  const root = resolve(localRoot);
+  const zip = new AdmZip(zipPath);
+  const tmpPaths: string[] = [];
+  try {
+    for (const entry of zip.getEntries()) {
+      if (entry.isDirectory) continue;
+      const dest = resolve(localRoot, entry.entryName);
+      const rel = relative(root, dest);
+      if (
+        rel === "" ||
+        rel === ".." ||
+        rel.startsWith(`..${sep}`) ||
+        isAbsolute(rel)
+      ) {
+        throw new Error(`Unsafe zip member path: ${entry.entryName}`);
+      }
+
+      await mkdir(dirname(dest), { recursive: true });
+      const tmp = `${dest}.tmp`;
+      await writeFile(tmp, entry.getData());
+      tmpPaths.push(tmp);
+      await rename(tmp, dest);
+      tmpPaths.pop();
+    }
+  } catch (err) {
+    for (const tmp of tmpPaths) {
+      try {
+        await unlink(tmp);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+    throw err;
+  }
+}
+
+/**
+ * Download a GitHub Release zip asset and extract it into localRoot.
+ *
+ * Keeps the data distribution path aligned with PRTS-MCP's pattern
+ * (release zip → local extraction → DirectoryStore reads) while preserving
+ * whatever on-disk layout the EndField mirror ships.
+ */
+export async function syncReleaseArchive(
+  spec: ReleaseArchiveSpec,
+): Promise<SyncResult> {
+  const releaseResult = await syncRelease({
+    owner: spec.owner,
+    repo: spec.repo,
+    assetName: spec.assetName,
+    localZip: spec.localZip,
+    validateZip: (zipPath) =>
+      validateArchiveZip(zipPath, spec.requiredFiles),
+  });
+
+  const dummySpec: RepoSpec = {
+    owner: spec.owner,
+    repo: spec.repo,
+    branch: "releases",
+    files: spec.requiredFiles,
+    localRoot: spec.localRoot,
+  };
+
+  const filesOk = archiveFilesPresent(spec);
+  if (releaseResult.status === "no_data") {
+    return filesOk
+      ? {
+          spec: dummySpec,
+          status: "offline_fallback",
+          commitSha: releaseResult.commitSha,
+          error: releaseResult.error,
+        }
+      : {
+          spec: dummySpec,
+          status: "no_data",
+          commitSha: releaseResult.commitSha,
+          error: releaseResult.error,
+        };
+  }
+
+  const shouldExtract = releaseResult.status === "updated" || !filesOk;
+  if (shouldExtract) {
+    try {
+      await safeExtractZip(spec.localZip, spec.localRoot);
+    } catch (err) {
+      const error = errorMessage(err);
+      return archiveFilesPresent(spec)
+        ? {
+            spec: dummySpec,
+            status: "offline_fallback",
+            commitSha: releaseResult.commitSha,
+            error,
+          }
+        : {
+            spec: dummySpec,
+            status: "no_data",
+            commitSha: releaseResult.commitSha,
+            error,
+          };
+    }
+
+    const missing = archiveMissingFiles(spec);
+    if (missing.length > 0) {
+      const error = `Archive extraction missing required files: ${missing.slice(0, 10).join("; ")}`;
+      return archiveFilesPresent(spec)
+        ? {
+            spec: dummySpec,
+            status: "offline_fallback",
+            commitSha: releaseResult.commitSha,
+            error,
+          }
+        : {
+            spec: dummySpec,
+            status: "no_data",
+            commitSha: releaseResult.commitSha,
+            error,
+          };
+    }
+  }
+
+  return {
+    spec: dummySpec,
+    status: releaseResult.status,
+    commitSha: releaseResult.commitSha,
+    error: releaseResult.error,
+  };
+}

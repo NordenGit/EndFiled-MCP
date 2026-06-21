@@ -7,8 +7,8 @@ shipped features, see the TypeScript CHANGELOG (once established).
 
 ## Current Release
 
-- TypeScript: `0.1.0-dev.0` (skeleton, not yet tagged)
-- 6 public MCP tools (Wiki-only MVP)
+- TypeScript: `0.2.0-dev.0` (GameData domain in progress on `feat/v0.2.0-gamedata-skeleton`, not yet tagged)
+- 9 public MCP tools (6 Wiki + 3 GameData/characters)
 - Single implementation: TypeScript / Bun
 - See `STATUS.md` for the verification matrix
 
@@ -42,20 +42,23 @@ Code finished and verified end-to-end (see `STATUS.md` verification matrix), but
 - WAF-bypass wiki client against endfield.wiki.gg
 - CI + runtime audit scripts
 
-### 0.2 — GameData Domain (Mirror + First Tables)
+### 0.2 — GameData Domain (Mirror + First Tables) — in progress
 
 The first dependency on the self-hosted mirror. Schema pinned to the
 endfield_research_kit `export_full/structured/StreamingAssets/Table/`
 contract (text-only JSON, no binary assets).
 
-- **Mirror repository** goes live with first Release zip
-- `startupSync.ts` real implementation (single-flight, retry/backoff,
-  cache-clearing cascade)
-- First data tools:
-  - `ef_list_characters()` / `ef_get_character_info(name)` — character
-    table equivalent of PRTS-MCP's operator triplet
-  - `ef_search_characters(pattern)` — regex search
-- `EF_DATA_PATH` env wiring meaningful (auto-sync disabled when user-set)
+- ✅ **Mirror repository** live at [3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData), v0.2.0 Release published (10 tables + 5 langs, 23MB)
+- ✅ `startupSync.ts` real implementation (single-flight, retry/backoff, cache-clearing cascade)
+- ✅ `data/sync.ts` — GitHub Release sync with cascade fallback, TTL cache, atomic write
+- ✅ `data/texts.ts` — i18n resolution layer (int64-safe, 5 languages)
+- ✅ `data/characters.ts` — character reader (list/get/search, multilingual)
+- ✅ Three character tools live: `ef_list_characters` / `ef_get_character_info` / `ef_search_characters`
+- ✅ int64 precision handling (`readJsonInt64Safe`) — Endfield's localization ids exceed JS `MAX_SAFE_INTEGER`
+- ⏳ Mirror repository CI workflow (design in `docs/admin/`, not yet implemented)
+- ⏳ Branch `feat/v0.2.0-gamedata-skeleton` pending PR merge to `dev`
+
+Key discovery during implementation: Endfield separates values from localization. Tables store `{id, text}` objects where `text` is empty and `id` is an int64 hash; the actual string lives in `I18nTextTable_<LANG>.json` under that hash. The `data/texts.ts` module owns that lookup, keeping readers ignorant of which language is active.
 
 ### 0.3 — Items + Stages
 
