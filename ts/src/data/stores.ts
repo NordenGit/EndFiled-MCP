@@ -21,8 +21,50 @@ export interface JsonStore {
   exists(path: string): boolean;
   readText(path: string): string;
   readJson<T = unknown>(path: string): T;
+  /**
+   * Parse JSON with int64-safe number handling.
+   *
+   * Endfield tables store localization ids as raw int64 numbers (e.g.
+   * `-7078064683023630592`), which exceed JS Number.MAX_SAFE_INTEGER
+   * (2^53-1). A plain `JSON.parse` silently truncates them, breaking i18n
+   * lookups. This variant pre-processes the text to wrap any integer
+   * whose absolute value exceeds MAX_SAFE_INTEGER in quotes, so the id
+   * survives as a string. Use it for any table containing `{id, text}`
+   * localization objects.
+   */
+  readJsonInt64Safe<T = unknown>(path: string): T;
   describe(): string;
   close(): void;
+}
+
+/**
+ * Pre-process JSON text so int64-sized integers are parsed as strings.
+ *
+ * Endfield localization ids (e.g. `-7078064683023630592`) exceed JS
+ * Number.MAX_SAFE_INTEGER (2^53-1). A plain `JSON.parse` silently
+ * truncates them, breaking i18n lookups. This wraps any bare integer
+ * literal whose absolute value exceeds MAX_SAFE_INTEGER in double quotes
+ * so it survives parsing as a string.
+ *
+ * The regex matches an optional sign + 15-19 digit run that sits in a
+ * JSON value position (after `:`, `,`, `[`, or `{`, optionally preceded
+ * by whitespace). Using a capture group for the prefix avoids the
+ * variable-width lookbehind limitation.
+ */
+function parseInt64Safe(text: string): string {
+  return text.replace(
+    /([,:[\{]\s*)(-?\d{15,19})/g,
+    (full, prefix: string, digits: string) => {
+      const n = BigInt(digits);
+      if (
+        n > BigInt(Number.MAX_SAFE_INTEGER) ||
+        n < BigInt(-Number.MAX_SAFE_INTEGER)
+      ) {
+        return `${prefix}"${digits}"`;
+      }
+      return full;
+    },
+  );
 }
 
 function normalizePath(path: string): string {
@@ -83,6 +125,10 @@ export class DirectoryStore implements JsonStore {
     return JSON.parse(this.readText(path)) as T;
   }
 
+  readJsonInt64Safe<T = unknown>(path: string): T {
+    return JSON.parse(parseInt64Safe(this.readText(path))) as T;
+  }
+
   describe(): string {
     return `directory:${this.root}`;
   }
@@ -134,6 +180,10 @@ export class ZipStore implements JsonStore {
     return JSON.parse(this.readText(path)) as T;
   }
 
+  readJsonInt64Safe<T = unknown>(path: string): T {
+    return JSON.parse(parseInt64Safe(this.readText(path))) as T;
+  }
+
   describe(): string {
     return `zip:${this.zipPath}`;
   }
@@ -172,6 +222,14 @@ export class FallbackStore implements JsonStore {
 
   readJson<T = unknown>(path: string): T {
     return JSON.parse(this.readText(path)) as T;
+  }
+
+  readJsonInt64Safe<T = unknown>(path: string): T {
+    const store = this.storeFor(path);
+    if (store === null) {
+      throw new Error(`Dataset file not found in fallback chain: ${path}`);
+    }
+    return store.readJsonInt64Safe<T>(path);
   }
 
   describe(): string {

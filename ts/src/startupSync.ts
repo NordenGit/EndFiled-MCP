@@ -1,28 +1,218 @@
 /**
- * Startup data-sync orchestration.
+ * Startup data sync orchestration.
  *
- * v0.1 placeholder: the skeleton ships without a GameData domain (Wiki tools
- * are the MVP surface). This module exposes the same `runStartupSync` entry
- * point the server calls, but it is a no-op until v0.2 wires up the
- * self-hosted mirror sync.
+ * Owns retry/backoff scheduling, single-flight locking, and the cache-clear
+ * cascade triggered when sync writes new data. Mirrors the design of
+ * PRTS-MCP's `ts/src/startupSync.ts`, simplified to a single dataset
+ * (GameData tables) for now. New datasets (story, audio) plug in by adding
+ * another `syncDataset` block — the orchestration scaffolding is reusable.
  *
- * The shape is intentionally aligned with PRTS-MCP's startupSync.ts so the
- * v0.2 implementation can drop in: single-flight locking, retry/backoff,
- * cache-clearing cascade — all of those patterns port cleanly.
+ * Contract:
+ * - Runs in a background task launched from `server.ts` before listen().
+ * - Skips sync when `EF_DATA_PATH` is explicitly set (user manages their
+ *   own data; we must not overwrite it).
+ * - Each dataset syncs under a single-flight lock so overlapping retries
+ *   share a mutex.
+ * - Retries with exponential backoff (30s / 120s / 600s) when network is
+ *   unavailable, then gives up until next process start.
+ * - Clears data-layer caches when a sync writes new data so stale reads
+ *   don't leak.
  */
 
-export interface SyncRunResult {
-  status: "skipped" | "done";
-  reason: string;
+import { join } from "node:path";
+import { loadConfig } from "./config.js";
+import {
+  archiveSpecForDataset,
+  GAMEDATA_TABLES,
+} from "./data/datasets.js";
+import {
+  type SyncResult,
+  syncReleaseArchive,
+} from "./data/sync.js";
+
+// ---------------------------------------------------------------------------
+// Logging
+// ---------------------------------------------------------------------------
+
+function log(level: "INFO" | "WARN" | "ERROR", msg: string): void {
+  const ts = new Date().toISOString();
+  process.stderr.write(`${ts} ${level} ef.sync: ${msg}\n`);
 }
 
-export async function runStartupSync(): Promise<SyncRunResult> {
-  // v0.1: nothing to sync. The Wiki domain is fetched live per-request via
-  // endfieldWiki.ts, and the GameData domain is intentionally absent.
-  // v0.2 will branch on config.isCustomDataPath and dispatch the mirror
-  // sync (syncReleaseArchive) here.
-  return {
-    status: "skipped",
-    reason: "v0.1 has no GameData domain; sync is a no-op.",
+// ---------------------------------------------------------------------------
+// Single-flight + retry scaffolding
+// ---------------------------------------------------------------------------
+
+const SYNC_RETRY_DELAYS_MS = [30_000, 120_000, 600_000] as const;
+const syncInFlight = new Set<string>();
+type SyncRunResult = "retry" | "done" | "skipped";
+
+function shouldRetrySync(status: SyncResult["status"]): boolean {
+  return status === "offline_fallback" || status === "no_data";
+}
+
+/**
+ * Run a sync function under a single-flight lock keyed by label.
+ *
+ * Returns:
+ *   - "skipped" if a sync with the same label is already running
+ *   - "retry" if the sync function returned true (needs another attempt)
+ *   - "done" if the sync function returned false (terminal state)
+ */
+async function singleFlightSync(
+  label: string,
+  runSync: () => Promise<boolean>,
+): Promise<SyncRunResult> {
+  if (syncInFlight.has(label)) {
+    log("INFO", `${label} sync is already running; skipping overlapping attempt.`);
+    return "skipped";
+  }
+  syncInFlight.add(label);
+  try {
+    return (await runSync()) ? "retry" : "done";
+  } finally {
+    syncInFlight.delete(label);
+  }
+}
+
+/**
+ * Schedule a retry with exponential backoff.
+ *
+ * Each delay is unref'd so the timer never keeps the process alive on its
+ * own. After the last attempt fails, gives up until next process start.
+ */
+function scheduleSyncRetry(
+  label: string,
+  runSync: () => Promise<boolean>,
+  attempt = 0,
+): void {
+  const delayMs = SYNC_RETRY_DELAYS_MS[attempt];
+  if (delayMs === undefined) {
+    log(
+      "WARN",
+      `${label} sync still needs retry after ${SYNC_RETRY_DELAYS_MS.length} attempts; waiting for next process start.`,
+    );
+    return;
+  }
+
+  const timer = setTimeout(() => {
+    void singleFlightSync(label, runSync)
+      .then((result) => {
+        if (result === "skipped") scheduleSyncRetry(label, runSync, attempt);
+        else if (result === "retry") scheduleSyncRetry(label, runSync, attempt + 1);
+      })
+      .catch((err: unknown) => {
+        log(
+          "ERROR",
+          `${label} retry sync threw unexpectedly: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+        scheduleSyncRetry(label, runSync, attempt + 1);
+      });
+  }, delayMs);
+  timer.unref?.();
+
+  log("INFO", `${label} sync will retry in ${Math.round(delayMs / 1000)}s.`);
+}
+
+// ---------------------------------------------------------------------------
+// Per-dataset sync runners
+// ---------------------------------------------------------------------------
+
+function logSyncResult(label: string, r: SyncResult): void {
+  const sha = r.commitSha ? r.commitSha.slice(0, 8) : "unknown";
+  if (r.status === "updated") {
+    log("INFO", `${label} updated from GitHub Release (${r.spec.repo} @ ${sha}).`);
+  } else if (r.status === "up_to_date") {
+    log("INFO", `${label} is up to date (${r.spec.repo} @ ${sha}).`);
+  } else if (r.status === "offline_fallback") {
+    log(
+      "WARN",
+      `Network unavailable; using cached ${label} (${r.spec.repo} @ ${sha}). Error: ${r.error}`,
+    );
+  } else {
+    log("ERROR", `${label} sync failed — no data. Error: ${r.error}`);
+  }
+}
+
+/**
+ * Build the sync runner for the GameData tables dataset.
+ *
+ * The returned function returns `true` when a retry is needed (network
+ * failure), `false` otherwise. Cache clearing is invoked when sync writes
+ * new data; reader modules expose their own `clearXxxCaches()` once
+ * implemented (SCHEMA_TODO: wire those imports when readers land).
+ */
+function makeTablesSyncRunner(
+  localZip: string,
+  localRoot: string,
+): () => Promise<boolean> {
+  const archiveSpec = archiveSpecForDataset(
+    GAMEDATA_TABLES,
+    localZip,
+    localRoot,
+  );
+
+  return async (): Promise<boolean> => {
+    const r = await syncReleaseArchive(archiveSpec);
+    logSyncResult("GameData tables", r);
+    if (r.status === "updated") {
+      // SCHEMA_TODO: once character/item/stage/enemy readers exist,
+      // call their clearXxxCaches() here so stale module-level caches
+      // don't leak after a data refresh. Pattern:
+      //   clearCharacterCaches();
+      //   clearItemCaches();
+      //   ...
+    }
+    return shouldRetrySync(r.status);
   };
+}
+
+// ---------------------------------------------------------------------------
+// Startup entry point
+// ---------------------------------------------------------------------------
+
+export async function runStartupSync(): Promise<void> {
+  const cfg = loadConfig();
+  const startupTasks: Promise<void>[] = [];
+
+  if (cfg.isCustomDataPath) {
+    log(
+      "INFO",
+      `EF_DATA_PATH is custom (${cfg.dataPath}); auto-sync disabled.`,
+    );
+    return;
+  }
+
+  // GameData tables
+  if (GAMEDATA_TABLES.requiredFiles.length === 0) {
+    log(
+      "WARN",
+      "GameData tables dataset has no requiredFiles pinned (SCHEMA_TODO); skipping sync until the mirror schema is finalized.",
+    );
+  } else {
+    const localZip = join(cfg.dataPath, "archives", GAMEDATA_TABLES.assetName);
+    const runTablesSync = makeTablesSyncRunner(localZip, cfg.dataPath);
+
+    startupTasks.push(
+      singleFlightSync("GameData tables", runTablesSync)
+        .catch((err: unknown) => {
+          log(
+            "ERROR",
+            `GameData tables sync threw unexpectedly: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          return true;
+        })
+        .then((result) => {
+          if (result !== "done") {
+            scheduleSyncRetry("GameData tables", runTablesSync);
+          }
+        }),
+    );
+  }
+
+  await Promise.all(startupTasks);
 }

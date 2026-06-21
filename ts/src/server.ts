@@ -16,9 +16,15 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { bindWikiConfig } from "./api/endfieldWiki.js";
 import { registerWikiTools } from "./tools/wikiTools.js";
+import { registerGamedataTools } from "./tools/gamedataTools.js";
+import { bindCharacterStore } from "./data/characters.js";
+import { bindTextStore } from "./data/texts.js";
+import { DirectoryStore } from "./data/stores.js";
 import { runStartupSync } from "./startupSync.js";
 import { runStdio } from "./transports/stdio.js";
 import { runHttp } from "./transports/http.js";
@@ -28,7 +34,7 @@ import { runHttp } from "./transports/http.js";
 // ---------------------------------------------------------------------------
 
 const SERVER_NAME = "Endfield_Wiki_Assistant";
-const SERVER_VERSION = "0.1.0-dev.0";
+const SERVER_VERSION = "0.2.0-dev.0";
 
 function log(level: "INFO" | "WARN" | "ERROR", msg: string): void {
   const ts = new Date().toISOString();
@@ -53,7 +59,8 @@ function createMcpServer(): McpServer {
     version: SERVER_VERSION,
   });
   registerWikiTools(server);
-  // v0.2 will add: registerGameDataTools(server);
+  registerGamedataTools(server);
+  // Future domains (items, stages, enemies) register here as they land.
   return server;
 }
 
@@ -64,6 +71,25 @@ function createMcpServer(): McpServer {
 async function main(): Promise<void> {
   const cfg = loadConfig();
   bindWikiConfig(cfg);
+
+  // Bind the GameData store only when the data directory actually exists.
+  // In v0.2-dev (mirror schema not yet pinned) the directory is usually
+  // absent; character tools will surface their "schema pending" message
+  // rather than crash on a missing-store error. Once the mirror is live
+  // and sync has populated the directory, this binding becomes meaningful.
+  if (existsSync(cfg.dataPath)) {
+    const store = new DirectoryStore(cfg.dataPath);
+    // Text resolver must bind before character reader — the reader calls
+    // resolveText() during projections, which needs the i18n index loaded.
+    bindTextStore(store);
+    bindCharacterStore(store);
+    log("INFO", `GameData store bound to ${cfg.dataPath}`);
+  } else {
+    log(
+      "INFO",
+      `GameData path ${cfg.dataPath} does not exist; GameData tools will report "schema pending" until the mirror is synced.`,
+    );
+  }
 
   log(
     "INFO",
