@@ -64,21 +64,36 @@ EndFiled-MCP/
 │   │   │   ├── sync.ts          # GitHub Release 同步（cascade + TTL + fallback）
 │   │   │   ├── datasets.ts      # 数据集 spec（10 表 + 5 语言）
 │   │   │   ├── texts.ts         # 本地化查询层（int64 哈希 → 实际文本）
-│   │   │   └── characters.ts    # 角色 reader（list/get/search）
+│   │   │   ├── characterTable.ts # 角色表 cache + resolver（bind/clear/resolve）
+│   │   │   ├── characterEnums.ts # 职业/属性/武器 中文名映射（纯数据）
+│   │   │   ├── characters.ts    # 角色 operations facade（list/get/search）
+│   │   │   ├── characterProfiles.ts # 角色档案 + 语音 reader
+│   │   │   ├── storyCore.ts     # 剧情 store 绑定 + 目录加载
+│   │   │   ├── storyChapters.ts # 章节推导 + 列表
+│   │   │   ├── storyScenes.ts   # 单场景按需读取 + 行归一化
+│   │   │   ├── storySearch.ts   # 全文检索（search.json 索引）
+│   │   │   ├── story.ts         # 剧情 barrel facade + 生命周期编排
+│   │   │   └── storyTypes.ts    # 剧情 public 类型
 │   │   ├── tools/
 │   │   │   ├── wikiTools.ts     # 6 个 ef_ Wiki 工具注册
-│   │   │   └── gamedataTools.ts # 3 个 ef_ GameData 工具注册
+│   │   │   ├── gamedataTools.ts # 5 个 ef_ GameData 工具注册（角色档案/语音/数值/list/search）
+│   │   │   ├── storyTools.ts    # 4 个 ef_ Story 工具注册
+│   │   │   └── toolRuntime.ts   # 共享错误处理（withGracefulError）
 │   │   ├── transports/
 │   │   │   ├── stdio.ts         # StdioServerTransport 封装
 │   │   │   └── http.ts          # Stateless Streamable HTTP（Bun.serve）
 │   │   └── utils/
 │   │       └── sanitizer.ts     # wikitext 清洗
-│   ├── tests/                   # bun:test（90 测试全绿）
+│   ├── tests/                   # bun:test（157 测试全绿）
 │   ├── scripts/
+│   │   ├── build-mirror-zip.ts  # 镜像 tables zip 打包（正斜杠 entry）
+│   │   ├── build-story-zip.ts   # 镜像 story zip 打包
+│   │   ├── fetch-bundled-data.ts # CD 用：从 GitHub Release 拉 bundled 数据
 │   │   ├── smoke-live.ts        # live WAF 绕过验证（Wiki）
-│   │   ├── smoke-gamedata.ts    # live GameData reader 验证（本地数据）
-│   │   ├── smoke-sync.ts        # live 镜像同步验证（GitHub Release）
-│   │   └── build-mirror-zip.ts  # 镜像 zip 打包工具（正斜杠 entry）
+│   │   ├── smoke-gamedata.ts    # live 角色数值 reader 验证
+│   │   ├── smoke-sync.ts        # live 镜像同步验证
+│   │   ├── smoke-bundled-fallback.ts # 三层 fallback 验证
+│   │   └── smoke-creation.ts    # live 档案/语音/剧情 验证
 │   ├── package.json             # type: module, Bun scripts
 │   ├── tsconfig.json
 │   └── CHANGELOG.md
@@ -92,33 +107,43 @@ EndFiled-MCP/
 │   ├── check-runtime.ps1        # Windows 环境审计
 │   └── check-runtime.sh         # Unix 环境审计
 ├── .github/workflows/
-│   └── ci.yml                   # Bun test + typecheck + build（Linux + Windows）
+│   ├── ci.yml                   # Bun test + typecheck + build（Linux + Windows 矩阵）
+│   └── cd.yml                   # tag 触发：fetch bundled + npm publish
 ├── AGENTS.md                    # AI 协作说明（运行时/环境）
 ├── STATUS.md                    # 本文件
 ├── ROADMAP.md                   # 路线图
 └── README.md                    # 面向用户的说明
 ```
 
-## 验收状态（v0.2.0）
+## 验收状态（v0.3.0）
 
 | 检查项 | 结果 |
 |--------|------|
-| `bun install` | ✅ 99 包 |
+| `bun install` | ✅ |
 | `bun run typecheck` | ✅ 零错误 |
-| `bun test` | ✅ **90/90 通过** |
+| `bun test` | ✅ **157/157 通过** |
 | `bun run build`（tsc emit） | ✅ dist 完整 |
-| stdio transport | ✅ 9 工具全部注册 |
+| stdio transport | ✅ 15 工具全部注册 |
 | HTTP transport | ✅ `/health`、`/mcp POST`（SSE）、`GET`（405） |
-| live WAF 绕过（Wiki） | ✅ `searchWiki("Endfield")` 2273 真实结果 |
-| live GameData reader | ✅ 29 角色正确解析（中文/英文名 + 四语言 CV） |
-| **live 镜像同步** | ✅ 从 `3aKHP/EndFieldGameData` v0.2.0 拉取成功，15 文件解压完整 |
+| live WAF 绕过（Wiki） | ✅ `ef_search_wiki("Endfield")` 真实结果 |
+| live GameData reader | ✅ 角色档案/语音/数值正确解析（CN/EN 名 + 四语言 CV） |
+| live Story reader | ✅ 9271 场景目录加载，conv 按需读取 |
+| **live 镜像同步** | ✅ tables + story 双 Release 自动同步 |
 | int64 精度处理 | ✅ `-7078064683023630592` → "管理员" 正确解析 |
 | 多语言切换 | ✅ 同一角色 CN/EN/JP/TC/KR 五语言名全部正确 |
+| **生产部署** | ✅ `mcp.4sljq.top/endfield/mcp`（5111，走 mihomo 代理） |
 
 ## 已知遗留
 
-- [ ] 镜像仓库的 CI workflow（`docs/admin/mirror-release-workflow.md` 有设计草稿，未实装）
-- [ ] Item/Stage/Enemy reader（v0.3+，数据已在镜像但 reader 未写）
-- [ ] Story / 剧情域（v0.5+，依赖剧情 JSON 源）
-- [ ] CHANGELOG 正式发布条目（v0.2.0 发布时建立）
-- [ ] `feat/v0.2.0-gamedata-skeleton` 分支 PR 合并到 `dev`
+技术债（详见 ROADMAP Patch Line）：
+
+- [ ] npm Trusted Publishing 迁移（当前用 NPM_TOKEN 首发模式，下个版本转 Trusted Publishing）
+- [ ] `ef_search_characters` 缺 `.max(200)` ReDoS 防护（story 工具已做，character 工具未对齐）
+- [ ] Story bundled data 未进 npm 包（tables 已 bundled，story 19MB 尚未）
+- [ ] Mirror CI workflow 未实装（`docs/admin/mirror-release-workflow.md` 有设计草稿）
+
+代码债务：
+
+- [ ] `SCHEMA_TODO` 残留（datasets.ts + startupSync.ts，待 mirror schema 最终确认后清理）
+- [ ] `characterProfiles.ts` 的 `LocalizedField` 与 `texts.ts` 的 `LocalizedText` 类型重复（语义等价，待统一）
+- [ ] `characterEnums.ts` 的三个枚举映射是硬编码（已对齐真实数据验证，但理想情况应从 `CharProfessionTable`/`CharTypeTable` 动态读取）

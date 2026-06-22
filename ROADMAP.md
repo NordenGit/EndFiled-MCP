@@ -3,122 +3,166 @@
 _Last updated: 2026-06-22_
 
 EndField-MCP is pre-1.0. This document tracks **what comes next**. For
-shipped features, see the TypeScript CHANGELOG (once established).
+shipped features, see the TypeScript CHANGELOG (`ts/CHANGELOG.md`).
 
 ## Current Release
 
-- TypeScript: `0.3.0` (first public release — Wiki + character archives/voices/info + story domain)
+- TypeScript: `0.3.0` — first public release
 - 15 public MCP tools (6 Wiki + 5 Character + 4 Story)
 - 157 unit tests passing
 - Single implementation: TypeScript / Bun
+- Production deployment: `mcp.4sljq.top/endfield/mcp` (走 mihomo 代理)
 - See `STATUS.md` for the verification matrix
 
-## Design Principles
+## 1.0 Compatibility Contract
 
-Inherited from PRTS-MCP and adapted to EndField's single-implementation reality:
+**1.0 之前**（当前）：工具名、必填参数、返回格式均**可能变化**。不做
+兼容承诺。早期使用者应预期 breakage，跟随 CHANGELOG 升级。
 
-1. **One data domain per minor release** — easier to communicate, migrate, and roll back. Each minor ships exactly one main data domain (characters, items, stages, enemies, story).
-2. **Patches don't add new capability surface** — bug fixes, docs, infra only. New tools ship in minor releases. Patches may introduce consolidation aliases whose semantics are already covered by existing tools, never a genuinely new capability.
-3. **Bind cross-source fusion to its data dependency** — don't ship a "stage enemies" tool before the "stage" domain exists.
-4. **Consolidate by schema shape, not by domain** — when the tool surface grows large enough to pressure context budgets (likely 2.0), merge tools that share parameter structure and output length; keep tools whose semantics genuinely differ.
-5. **Lead breaking changes by a release** — 1.0's tool-name freeze is the contract; nothing before then is stable. 2.0's planned breaks (output_format flip, alias removal) are prepared throughout 1.x, not announced at the last minute.
-6. **Single implementation is a feature, not a limitation** — the decision to ship only TypeScript/Bun (no Python sibling) is final. It eliminates the parity debt PRTS-MCP carries. New capability must fit the single-implementation model; do not propose reintroducing a second language.
+**1.0 之后**：以下成为兼容契约，minor/patch 不得破坏：
+
+- 全部 `ef_*` 工具名
+- 全部必填参数的名称与类型
+- 返回的 markdown 结构形态（字段可增，不可删/改语义）
+- 环境变量契约（`EF_TRANSPORT`、`PORT`/`HOST`、`HTTPS_PROXY`）
+
+**1.x 允许的增量变更**（不破坏契约）：
+
+- 新增工具（additive）
+- 新增可选参数（带安全默认值）
+- 新增可选数据源 / fallback 层
+- 同一格式内的内容增强
+
+## Decision Principles
+
+1. **叙事素材优先于游戏机制** — Endfield 的同人创作场景核心是人物与
+   故事，而非数值配队。Worldbuilding、角色日常、关系系统优先于
+   Items/Stages/Enemies 等机制域。
+2. **一个 minor 承载一个主数据域** — 便于沟通、迁移、回滚。跨源融合
+   工具（如 stage-enemy）随其数据依赖的 minor 一起发布或更晚。
+3. **Patch 不扩展能力面** — bug 修复、文档、基建、以及语义已被现有
+   工具覆盖的合并别名。新工具在 minor 发布。
+4. **领先 breakage 一个版本** — 1.0 的工具名冻结是契约；2.0 计划的
+   破坏性变更（output_format 翻转、别名移除）在 1.x 全程准备，而非
+   最后一刻宣布。
+5. **单实现是特性而非限制** — 只发 TypeScript/Bun（无 Python 兄弟），
+   消除 PRTS-MCP 承担的对等债。新能力必须适配单实现模型。
+6. **按 schema 形态合并，不按域合并** — 工具面增长到挤压上下文预算时
+   （预计 2.0），合并共享参数结构/输出长度的工具；保留语义真正不同的。
 
 ## Minor Release Plan
 
-Each minor version carries one main data domain. The version sequencing may
-shift based on what the self-hosted mirror actually lands first.
+每个 minor 承载一个主数据域。版本顺序按同人创作价值排序，可能根据
+self-hosted mirror 实际落地情况调整。
 
-### 0.1 — Skeleton + Wiki MVP (code complete, unreleased)
+### 0.4 — Worldbuilding（世界观素材）
 
-Code finished and verified end-to-end (see `STATUS.md` verification matrix), but no git tag yet. The `0.1.0` tag is cut at the first real release after `git init` + initial commit.
+Endfield 的核心世界观入口，目前完全不可访问。
 
-- Project scaffold: Bun + TS + MCP SDK
-- 6 Wiki tools (`ef_search_wiki`, `ef_read_wiki_page`,
-  `ef_list_wiki_sections`, `ef_get_wiki_categories`,
-  `ef_get_wiki_links`, `ef_get_wiki_template`)
-- stdio + Streamable HTTP stateless transports
-- Store abstraction layer (Directory / Zip / Fallback) — data-layer ready,
-  no consumers yet
-- WAF-bypass wiki client against endfield.wiki.gg
-- CI + runtime audit scripts
+**数据源**（需扩展 `TABLE_FILES` + 重新发镜像 Release）：
 
-### 0.2 — GameData Domain (Mirror + First Tables) — in progress
+- `Prts*.json`（~10 表）— 游戏内 PRTS 档案系统：文档、页面、笔记、
+  调查记录、分类
+- `WikiEntry*.json` + `WikiCategory*.json` + `WikiGroupTable.json` —
+  游戏内百科/百科全书
 
-The first dependency on the self-hosted mirror. Schema pinned to the
-endfield_research_kit `export_full/structured/StreamingAssets/Table/`
-contract (text-only JSON, no binary assets).
+**工具**：
 
-- ✅ **Mirror repository** live at [3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData), v0.2.0 Release published (10 tables + 5 langs, 23MB)
-- ✅ `startupSync.ts` real implementation (single-flight, retry/backoff, cache-clearing cascade)
-- ✅ `data/sync.ts` — GitHub Release sync with cascade fallback, TTL cache, atomic write
-- ✅ `data/texts.ts` — i18n resolution layer (int64-safe, 5 languages)
-- ✅ `data/characters.ts` — character reader (list/get/search, multilingual)
-- ✅ Three character tools live: `ef_list_characters` / `ef_get_character_info` / `ef_search_characters`
-- ✅ int64 precision handling (`readJsonInt64Safe`) — Endfield's localization ids exceed JS `MAX_SAFE_INTEGER`
-- ⏳ Mirror repository CI workflow (design in `docs/admin/`, not yet implemented)
-- ⏳ Branch `feat/v0.2.0-gamedata-skeleton` pending PR merge to `dev`
+- `ef_search_lore(pattern, category?)` — 全文检索世界观文档
+- `ef_read_lore_document(doc_id)` — 读取单个文档全文
+- `ef_list_lore_categories()` — 列出世界观分类
+- `ef_get_wiki_entry(entry_id)` — 读取百科词条
 
-Key discovery during implementation: Endfield separates values from localization. Tables store `{id, text}` objects where `text` is empty and `id` is an int64 hash; the actual string lives in `I18nTextTable_<LANG>.json` under that hash. The `data/texts.ts` module owns that lookup, keeping readers ignorant of which language is active.
+### 0.5 — Character Life（角色日常）
 
-### 0.3 — Items + Stages
+角色性格的非战斗表达，同人创作的对话素材金矿。
 
-- `ef_list_items(category?)` / `ef_get_item_info(name)` / `ef_search_items(pattern)`
-- `ef_list_stages(chapter?, type?)` / `ef_get_stage_info(stage_id)` / `ef_search_stages(pattern)`
-- Item category taxonomy + stage zone table readers
+**数据源**：
 
-### 0.4 — Enemies
+- `SNSChatTable.json` / `SNSDialogTable.json` / `SNSDialogOptionTable.json`
+  / `SNSDialogTopicTable.json` — 游戏内"社交/通讯"应用的角色的对话
+- `DialogTextTable.json` + `DialogOptionTable.json` + `EnvTalkTable.json`
+  — 独立对话文本 + 环境对话触发
+- `NpcTable.json` / `NpcInfoTable.json` — 具名 NPC
 
-- `ef_list_enemies()` / `ef_get_enemy_info(name)` / `ef_search_enemies(pattern)`
-- Stage-enemy fusion (mirrors PRTS-MCP 1.6.0):
-  `ef_get_stage_enemies(stage_id)`, `ef_get_enemy_appearances(name)`
+**工具**：
 
-### 0.5 — Story / Lore
+- `ef_get_character_sns(char_id)` — 角色的 SNS 聊天记录
+- `ef_search_dialog(pattern, speaker?)` — 跨对话全文检索
+- `ef_list_npcs()` / `ef_get_npc_info(name)` — NPC 浏览/查询
 
-Depends on a story-JSON source. Endfield has no ArknightsStoryJson
-equivalent yet — either we mirror the endfield_research_kit story builder
-output or partner with a community source.
+### 0.6 — Relationships & Factions（角色深度 + 阵营）→ 1.0 冻结
 
-- `ef_list_story_events(category?)` / `ef_list_stories(event_id)`
-- `ef_read_story(story_key)` / `ef_get_event_summary(event_id)`
-- `ef_search_stories(pattern, character?, line_type?)`
+角色关系网与阵营归属。此处冻结 1.0——此时工具数预计 25-30，创作向
+工具形态已收敛。
+
+**数据源**：
+
+- `SpaceshipCharRelationLevelTable.json` / `SpaceshipCharRelationNeedMap.json`
+  — 角色关系等级
+- `SpaceshipClueData*.json` — 角色线索（世界观揭示）
+- `SpaceshipSubCharGiftTable.json` / `SpaceshipCharGiftGainRatio.json` —
+  礼物偏好
+- `BlocDataTable.json` — 阵营/势力（解决 `CharacterTable.department`
+  当前是 opaque 字段的问题）
+
+**工具**：
+
+- `ef_get_character_relationships(char_id)` — 角色关系网
+- `ef_get_character_clues(char_id)` — 角色线索/档案
+- `ef_get_gift_guide(char_id)` — 礼物偏好指南
+- `ef_list_factions()` / `ef_get_faction_info(name)` — 阵营浏览
 
 ### 1.0 — Surface Freeze
 
-- Public tool names + required parameters become a compatibility contract
-- CHANGELOG established, version tag dropped (`v1.0.0`)
-- Migration notes published if any 0.x tool changed shape
+- 公开工具名 + 必填参数成为兼容契约（见上方 Compatibility Contract）
+- CHANGELOG 建立，版本 tag 落地（`v1.0.0`）
+- 如有 0.x 工具形态调整，发布迁移说明
 
-## Patch Line (0.x.y)
+### 1.x — Game Mechanics（游戏机制域，1.0 后增量）
 
-| Tentative | Theme | Scope |
-|-----------|-------|-------|
-| 0.1.1 | Docker image | Bun-based Dockerfile, CI publishes image |
-| 0.1.2 | npm publish | First public `endfield-mcp` package on npm |
-| 0.1.3 | Tool description optimization | Keyword-rich descriptions for client-side tool RAG |
-| 0.2.x | Mirror infra hardening | Cache TTL, mirror cascade, offline fallback polish |
+创作向域冻结后，补充游戏机制域。这些数据价值较低但覆盖面广。
 
-## 2.0 Boundary (not before 1.x matures)
+- **Items / Equipment** — `ItemTable.json` + `EquipTable.json` 已在镜像
+  同步，无需重发。`ef_list_items` / `ef_get_item_info` / `ef_search_items`
+- **Stages / Dungeons** — `DungeonTable.json` 系列。`ef_list_stages` /
+  `ef_get_stage_info`
+- **Enemies** — `EnemyTable.json` 已同步。`ef_list_enemies` /
+  `ef_get_enemy_info` + stage-enemy 跨源融合
 
-2.0 is a major bump and won't be considered until **all three** triggers fire:
+## Patch Line (0.3.x)
 
-1. The tool surface grows large enough to pressure context budgets for 128K-class models (PRTS-MCP hit this around 30 tools; our threshold is similar).
-2. At least one breaking change is genuinely needed and can't be deferred via additive parameters.
-3. 1.x has been stable for enough releases that a major bump won't strand users.
+Patches 只做 bug 修复、基建、不扩展能力面。
 
-Reserved 2.0 topics:
+| 版本 | 主题 | 内容 |
+|------|------|------|
+| **0.3.1** | 技术债清理 | (1) npm Trusted Publishing 迁移——npm 侧配 trusted publisher，cd.yml 加回 `--provenance`，去掉 NPM_TOKEN；(2) S7: `ef_search_characters` 加 `.max(200)` ReDoS 防护（对齐 story 工具）；(3) Story bundled data——19MB story bundle 进 npm 包，让离线场景有兜底；(4) Mirror CI workflow——EndFieldGameData 仓库的自动重导出 GitHub Actions |
+| 0.3.2（保留） | 体验优化 | 工具描述关键词优化（提升客户端 RAG 召回）/ 分页标准化 `{total, offset, limit, items}` / 结构化错误 `{error_code, message}` |
 
-- Tool-surface consolidation by schema shape (the PRTS-MCP 2.0 plan — merge tools that share parameter structure and output length).
-- `output_format=markdown|json` selector with staged default flip (markdown default in 1.x, flip to json in 2.0).
-- Re-evaluating whether GameData should move to a community-hosted source once one emerges.
+## 2.0 Boundary（not before 1.x matures）
+
+2.0 是 major bump，**三个触发条件全部满足**前不考虑：
+
+1. 工具面增长到挤压 128K 模型的上下文预算（PRTS-MCP 在 ~30 工具时
+   触发；我们的阈值相近）。
+2. 至少有一个破坏性变更真正需要，且无法通过新增可选参数推迟。
+3. 1.x 已稳定足够多的版本，major bump 不会困住用户。
+
+**保留的 2.0 议题**：
+
+- 按 schema 形态合并工具面（PRTS-MCP 2.0 计划——合并共享参数结构/
+  输出长度的工具）。
+- `output_format=markdown|json` 选择器，staged default flip（1.x 默认
+  markdown，2.0 翻转为 json）——这是唯一的破坏性变更。
+- 待社区托管的 GameData 源出现后，重新评估是否迁移。
 
 ## Non-Goals
 
-- Shipping every Endfield data table — pick what's useful for fan creation.
-- Embedding large fallback data in the npm package.
-- Multi-language wiki support (endfield.wiki.gg is English-only; we rely on
-  the calling LLM to bridge languages).
-- Re-implementing the endfield_research_kit exporter in-process. We consume
-  its output via the mirror, not run it.
-- Supporting both Python and TypeScript implementations. The single-TS
-  decision is final for this project.
+- **不做**全表覆盖——从 ~500 个导出表里挑选对同人创作有用的子集。
+- **不做**在 npm 包内嵌入大体量 fallback 数据（除 tables 兜底外；
+  story bundled data 是有意为之的例外）。
+- **不做**多语言 wiki 支持（endfield.wiki.gg 是英文；靠调用方 LLM
+  桥接语言）。
+- **不做**在进程内重新实现 endfield_research_kit 导出器。我们消费
+  其输出，不运行它。
+- **不做**Python + TypeScript 双实现。单 TS 决策对本项目是终局。
