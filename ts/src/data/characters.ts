@@ -218,10 +218,15 @@ export function listCharacters(
 }
 
 /** Get detailed info for one character by id (exact match) or name. */
-export function getCharacterInfo(
+/**
+ * Resolve a character by id, CN name, requested-lang name, or engName.
+ * Returns `{id, entry}` on hit, `null` on miss. Shared by getCharacterInfo
+ * and the characterProfiles module so both use the same lookup precedence.
+ */
+export function resolveCharacterEntry(
   idOrName: string,
   lang: LanguageCode = "CN",
-): CharacterInfo | null {
+): { id: string; entry: CharacterEntry } | null {
   const t = table();
   // Try exact id first.
   let entry: CharacterEntry | undefined = t[idOrName];
@@ -247,6 +252,16 @@ export function getCharacterInfo(
   }
 
   if (entry === undefined) return null;
+  return { id: resolvedId, entry };
+}
+
+export function getCharacterInfo(
+  idOrName: string,
+  lang: LanguageCode = "CN",
+): CharacterInfo | null {
+  const resolved = resolveCharacterEntry(idOrName, lang);
+  if (resolved === null) return null;
+  const { id: resolvedId, entry } = resolved;
 
   return {
     id: resolvedId,

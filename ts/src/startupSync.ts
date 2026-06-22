@@ -24,9 +24,11 @@ import { loadConfig } from "./config.js";
 import {
   archiveSpecForDataset,
   GAMEDATA_TABLES,
+  STORY_CN,
 } from "./data/datasets.js";
 import { clearCharacterCaches } from "./data/characters.js";
 import { clearTextCaches } from "./data/texts.js";
+import { clearStoryCaches } from "./data/story.js";
 import { createLogger } from "./utils/log.js";
 import {
   type SyncResult,
@@ -170,6 +172,30 @@ function makeTablesSyncRunner(
   };
 }
 
+/**
+ * Build the sync runner for the Story CN dataset.
+ *
+ * Story data lives in its own subdirectory under cfg.dataPath to keep
+ * the 9271 conv/ files separate from the tables/ bundle. Cache clearing
+ * drops the story catalog + search index so the next read picks up new
+ * data after a refresh.
+ */
+function makeStorySyncRunner(
+  localZip: string,
+  localRoot: string,
+): () => Promise<boolean> {
+  const archiveSpec = archiveSpecForDataset(STORY_CN, localZip, localRoot);
+
+  return async (): Promise<boolean> => {
+    const r = await syncReleaseArchive(archiveSpec);
+    logSyncResult("Story CN", r);
+    if (r.status === "updated") {
+      clearStoryCaches();
+    }
+    return shouldRetrySync(r.status);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Startup entry point
 // ---------------------------------------------------------------------------
@@ -210,6 +236,33 @@ export async function runStartupSync(): Promise<void> {
         .then((result) => {
           if (result !== "done") {
             scheduleSyncRetry("GameData tables", runTablesSync);
+          }
+        }),
+    );
+  }
+
+  // Story CN
+  if (STORY_CN.requiredFiles.length === 0) {
+    log("WARN", "Story CN dataset has no requiredFiles; skipping sync.");
+  } else {
+    const storyRoot = join(cfg.dataPath, "story");
+    const localZip = join(storyRoot, "archives", STORY_CN.assetName);
+    const runStorySync = makeStorySyncRunner(localZip, storyRoot);
+
+    startupTasks.push(
+      singleFlightSync("Story CN", runStorySync)
+        .catch((err: unknown) => {
+          log(
+            "ERROR",
+            `Story CN sync threw unexpectedly: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+          return true;
+        })
+        .then((result) => {
+          if (result !== "done") {
+            scheduleSyncRetry("Story CN", runStorySync);
           }
         }),
     );
