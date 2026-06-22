@@ -159,7 +159,7 @@ describe("getCharacterInfo", () => {
     expect(info!.engName).toBe("Endministrator");
     expect(info!.profession).toBe("近卫");
     expect(info!.professionCode).toBe(0);
-    expect(info!.weaponType).toBe("剑");
+    expect(info!.weaponType).toBe("单手剑");
     expect(info!.weaponTypeCode).toBe(1);
   });
 
