@@ -423,8 +423,10 @@ describe("searchStories", () => {
 
   it("adds ... prefix when match starts past the 30-char window", () => {
     // matchIdx must exceed 30 for start = matchIdx-30 to be > 0.
-    // Construct a 50-char preamble so "关键词" sits at index 50.
+    // Construct a 40-char CJK preamble (each char = 1 UTF-16 unit) so
+    // "关键词" sits at index 40.
     const preamble = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十";
+    expect(preamble.length).toBe(40); // sanity check on the fixture
     writeFileSync(
       join(TMP, "search.json"),
       JSON.stringify({
@@ -456,10 +458,22 @@ describe("searchStories", () => {
   });
 
   it("falls back to literal search on invalid regex", () => {
-    // "(" is invalid as a regex; reader escapes it and searches literally.
-    // No entry contains "(" so this returns 0 hits without throwing.
+    // "(" is invalid as a regex; the reader escapes it to \( and searches
+    // literally. We seed an entry containing a literal "(" so this proves
+    // BOTH that the fallback doesn't throw AND that the escaped pattern
+    // actually matches (characters.test.ts:225-232 only proved no-throw;
+    // here we go one step further).
+    writeFileSync(
+      join(TMP, "search.json"),
+      JSON.stringify({
+        entries: [{ k: "e1m1s1", x: "dialog (with parens) content" }],
+      }),
+    );
+    clearStoryCaches();
+    bindStoryStore(new DirectoryStore(TMP));
     const hits = searchStories("(", 10);
-    expect(hits).toEqual([]);
+    expect(hits.length).toBe(1);
+    expect(hits[0]!.key).toBe("e1m1s1");
   });
 
   it("returns empty when search.json is missing (optional)", () => {
