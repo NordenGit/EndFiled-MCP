@@ -4,7 +4,11 @@ All notable changes to EndField-MCP (TypeScript implementation) are recorded
 here. Format follows [Keep a Changelog](https://keepachangelog.com/),
 versioning follows [Semantic Versioning](https://semver.org/).
 
-## [Unreleased] — v0.3.0 Creation-oriented tools
+## [Unreleased]
+
+No changes yet.
+
+## [0.3.0] — 2026-06-22 — Creation-oriented tools
 
 ### Added
 
@@ -26,7 +30,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `server.ts`: story store always constructed unconditionally via FallbackStore (matching GameData pattern — never gate binding on directory existence, or background sync data is permanently missed).
 - `datasets.ts`: added STORY_CN ReleaseDatasetSpec.
 - `withGracefulError` extracted to shared `tools/toolRuntime.ts` (was duplicated in gamedataTools + storyTools).
-- Version bumped to 0.3.0-dev.0.
+- Version bumped to 0.3.0 (first public release).
 
 ### Fixed
 
@@ -35,7 +39,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `searchStories` caches the 9271-entry key→entry Map at module level instead of rebuilding on every call. Addresses CR #2 S6.
 - Story store bound unconditionally at startup (was gated on directory existence — a regression that would permanently miss background-synced data). Addresses CR #2 B1.
 
-## [0.2.0-unreleased] — v0.2.0 GameData domain
+## [0.2.0] — 2026-06-22 — GameData domain
 
 ### Added
 
@@ -66,7 +70,7 @@ versioning follows [Semantic Versioning](https://semver.org/).
 - `startupSync.ts` now calls `clearTextCaches()` + `clearCharacterCaches()` after a successful background refresh. Previously stale data was served until process restart. Addresses CR #1 B3.
 - `texts.ts:loadLanguageIndex` uses `readJsonInt64Safe` instead of `readJson` for defense-in-depth against future i18n key format changes. Addresses CR #1 B4.
 
-## [0.1.0-unreleased] — v0.1.0 skeleton
+## [0.1.0] — 2026-06-22 — Skeleton
 
 ### Added
 
