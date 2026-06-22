@@ -22,6 +22,7 @@ jobs:
   publish-npm:
     name: Publish npm package
     runs-on: ubuntu-latest
+    environment: npm  # NPM_TOKEN lives under this environment
     steps:
       - uses: actions/checkout@v4
 
@@ -74,7 +75,7 @@ jobs:
         if: github.event_name == 'push'
         working-directory: ts
         run: |
-          npm publish --access public --provenance
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
