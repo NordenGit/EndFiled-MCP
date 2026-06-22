@@ -161,8 +161,9 @@ export function registerStoryTools(server: McpServer): void {
     {
       pattern: z
         .string()
+        .max(200, "搜索模式过长（上限 200 字符），请缩短后重试。")
         .describe(
-          "正则表达式（大小写不敏感），如「源石」「陈千语」「基地」。无效正则会退化为字面子串匹配。",
+          "正则表达式（大小写不敏感，上限 200 字符），如「源石」「陈千语」「基地」。无效正则会退化为字面子串匹配。",
         ),
       max_results: z
         .number()

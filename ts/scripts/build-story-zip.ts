@@ -67,7 +67,6 @@ for (const f of ROOT_FILES) {
 }
 
 // conv/ directory — all dialogue scene files.
-const convDir = join(srcDir, "conv");
 const convFiles = walkFiles(srcDir, "conv").sort();
 console.log(`\n  conv/ (${convFiles.length} files)...`);
 for (const full of convFiles) {

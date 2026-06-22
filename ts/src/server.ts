@@ -16,7 +16,7 @@
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./utils/log.js";

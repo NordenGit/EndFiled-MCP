@@ -5,11 +5,13 @@
  * data shape (conv files have actor/text inline, not name/content props).
  */
 
-/** A single line in a dialogue scene, normalized to three kinds. */
+/** A single line in a dialogue scene, normalized to two kinds. */
 export interface StoryLine {
-  /** "dialog" (spoken by a character), "narration" (stage text), "choice" (player option). */
-  type: "dialog" | "narration" | "choice";
-  /** Speaker display name for dialog lines; null for narration/choice. */
+  /** "dialog" (spoken by a character) or "narration" (stage text). Player
+   *  choices live in StoryScene.choices, not in the lines array — Endfield's
+   *  data puts them in a separate optionGroups structure. */
+  type: "dialog" | "narration";
+  /** Speaker display name for dialog lines; null for narration. */
   role: string | null;
   /** The line text. */
   text: string;

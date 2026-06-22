@@ -217,7 +217,6 @@ export function listCharacters(
   }));
 }
 
-/** Get detailed info for one character by id (exact match) or name. */
 /**
  * Resolve a character by id, CN name, requested-lang name, or engName.
  * Returns `{id, entry}` on hit, `null` on miss. Shared by getCharacterInfo
