@@ -17,13 +17,16 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { loadConfig } from "./config.js";
 import { createLogger } from "./utils/log.js";
 import { bindWikiConfig } from "./api/endfieldWiki.js";
 import { registerWikiTools } from "./tools/wikiTools.js";
 import { registerGamedataTools } from "./tools/gamedataTools.js";
+import { registerStoryTools } from "./tools/storyTools.js";
 import { bindCharacterStore } from "./data/characters.js";
 import { bindTextStore } from "./data/texts.js";
+import { bindStoryStore } from "./data/story.js";
 import { DirectoryStore, FallbackStore, type JsonStore } from "./data/stores.js";
 import { runStartupSync } from "./startupSync.js";
 import { runStdio } from "./transports/stdio.js";
@@ -34,7 +37,7 @@ import { runHttp } from "./transports/http.js";
 // ---------------------------------------------------------------------------
 
 const SERVER_NAME = "Endfield_Wiki_Assistant";
-const SERVER_VERSION = "0.2.0-dev.0";
+const SERVER_VERSION = "0.3.0-dev.0";
 
 const log = createLogger("ef.server");
 
@@ -57,7 +60,7 @@ function createMcpServer(): McpServer {
   });
   registerWikiTools(server);
   registerGamedataTools(server);
-  // Future domains (items, stages, enemies) register here as they land.
+  registerStoryTools(server);
   return server;
 }
 
@@ -105,6 +108,33 @@ async function main(): Promise<void> {
   // resolveText() during projections, which needs the i18n index loaded.
   bindTextStore(dataStore);
   bindCharacterStore(dataStore);
+
+  // Story store: always construct FallbackStore unconditionally (matching
+  // the GameData pattern above). The synced/story directory may not exist
+  // at startup but gets populated by background sync — DirectoryStore
+  // returns false from exists() for missing dirs, so FallbackStore
+  // transparently falls through until sync writes files. Gating the
+  // binding on directory existence would permanently miss later-synced
+  // data (the exact trap the GameData path was rewritten to avoid).
+  const storySynced = join(cfg.dataPath, "story");
+  const storyBundled = join(cfg.bundledDataPath, "story");
+  const storySyncedExists = existsSync(storySynced);
+  const storyBundledExists = existsSync(storyBundled);
+  const storyStore: JsonStore = new FallbackStore(
+    new DirectoryStore(storySynced),
+    new DirectoryStore(storyBundled),
+  );
+  bindStoryStore(storyStore);
+  log(
+    "INFO",
+    `Story store: FallbackStore(synced=${storySynced}${storySyncedExists ? "" : " [absent]"}, bundled=${storyBundled}${storyBundledExists ? "" : " [absent]"})`,
+  );
+  if (!storySyncedExists && !storyBundledExists) {
+    log(
+      "INFO",
+      `Story data not yet available — both layers absent. Story tools will report "no data" until the v0.3.0 mirror sync completes.`,
+    );
+  }
 
   log(
     "INFO",

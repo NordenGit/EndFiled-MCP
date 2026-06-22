@@ -6,26 +6,29 @@ _Last updated: 2026-06-22_
 
 | 实现 | 版本 | 状态 |
 |------|------|------|
-| TypeScript（Bun） | 0.2.0-dev.0 | GameData 域（角色）已端到端跑通，镜像仓库已上线 |
+| TypeScript（Bun） | 0.3.0-dev.0 | 创作导向工具（角色档案/语音 + 剧情文本）已端到端跑通 |
 
-- 当前工具：9 个（6 Wiki + 3 GameData）
+- 当前工具：15 个（6 Wiki + 5 Character + 4 Story）
 - 单实现：仅 TypeScript / Bun（不搞双实现——TS 一套覆盖 stdio + HTTP）
 - 兼容性预期：1.0 前工具名/必填参数可变；1.0 后冻结（参考 PRTS-MCP 政策）
 
 ## 当前分支
 
-`main`（生产，与 `dev` 同步在 init commit）← 这是 v0.1 的状态。v0.2 的工作目前在 `feat/v0.2.0-gamedata-skeleton` 分支上，待 PR 合并到 `dev`。
+- `main` — v0.1 init commit（待 v0.2 合入）
+- `dev` — v0.2.0 GameData domain（已合并，含 sync/bundled/镜像仓库基础设施）
+- `feat/v0.3.0-creation-tools` — v0.3.0 创作导向工具（当前工作分支）
 
 ## 数据源
 
 | 数据源 | 用途 | 接入方式 | 状态 |
 |--------|------|----------|------|
 | [endfield.wiki.gg](https://endfield.wiki.gg/api.php) | 世界观词条、阵营设定 | 实时 HTTP（浏览器 UA + Referer 绕 WAF） | ✅ v0.1 |
-| [3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData) | 角色/敌人/装备/物品表格 + 5 语言本地化 | GitHub Release zip（自动同步 + 镜像级联） | ✅ v0.2.0 |
+| [3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData) `endfield-tables.zip` | 角色数值/敌人/装备/物品表格 + 5 语言本地化 | GitHub Release zip（自动同步 + 镜像级联 + bundled 兜底） | ✅ v0.2.0 |
+| [3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData) `endfield-story-CN.zip` | 剧情对话场景（9271 个场景，CN 全文本） | GitHub Release zip（自动同步，按需读 conv 文件） | ✅ v0.3.0 |
 
 Wiki 内容以英文为主；调用方 LLM 负责桥接到用户语言。GameData 支持中文/英文/日文/繁中/韩文五种语言，工具描述与项目文档使用中文。
 
-## 工具清单 (9, current branch)
+## 工具清单 (15, current branch)
 
 | # | 工具 | 数据源 | 版本 |
 |---|------|--------|------|
@@ -35,9 +38,15 @@ Wiki 内容以英文为主；调用方 LLM 负责桥接到用户语言。GameDat
 | 4 | `ef_get_wiki_categories` | endfield.wiki.gg | 0.1.0 |
 | 5 | `ef_get_wiki_links` | endfield.wiki.gg | 0.1.0 |
 | 6 | `ef_get_wiki_template` | endfield.wiki.gg | 0.1.0 |
-| 7 | `ef_list_characters` | EndFieldGameData v0.2.0 | 0.2.0 |
-| 8 | `ef_get_character_info` | EndFieldGameData v0.2.0 | 0.2.0 |
-| 9 | `ef_search_characters` | EndFieldGameData v0.2.0 | 0.2.0 |
+| 7 | `ef_get_character_archives` | EndFieldGameData tables | 0.3.0 |
+| 8 | `ef_get_character_voices` | EndFieldGameData tables | 0.3.0 |
+| 9 | `ef_get_character_basic_info` | EndFieldGameData tables | 0.3.0 |
+| 10 | `ef_list_characters` | EndFieldGameData tables | 0.2.0 |
+| 11 | `ef_search_characters` | EndFieldGameData tables | 0.2.0 |
+| 12 | `ef_list_story_chapters` | EndFieldGameData story | 0.3.0 |
+| 13 | `ef_list_stories` | EndFieldGameData story | 0.3.0 |
+| 14 | `ef_read_story` | EndFieldGameData story | 0.3.0 |
+| 15 | `ef_search_stories` | EndFieldGameData story | 0.3.0 |
 
 ## 仓库结构
 

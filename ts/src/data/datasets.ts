@@ -191,10 +191,28 @@ export const GAMEDATA_TABLES: ReleaseDatasetSpec = {
   requiredFiles: ALL_REQUIRED_FILES,
 };
 
-// Future datasets (story, audio, assets) will be added here as their
-// mirror assets are defined. Story likely needs its own asset because
-// endfield_research_kit's story builder output has a different shape
-// than the Table/ dumps.
+/**
+ * Story dialogue bundle (CN) — the v0.3.0 dataset.
+ *
+ * Ships the catalog (index/missions/actors/search) and all 9271 conv
+ * files. ~19MB zipped. requiredFiles only lists the catalog — conv/
+ * entries are read on-demand by story reader (per-scene fetch), not
+ * validated at startup (9271 files would make the check expensive).
+ */
+export const STORY_REQUIRED_FILES: readonly string[] = [
+  "index.json",
+  "missions.json",
+  "actors.json",
+  "search.json",
+] as const;
+
+export const STORY_CN: ReleaseDatasetSpec = {
+  datasetId: "story.cn",
+  owner: MIRROR_OWNER,
+  repo: MIRROR_REPO,
+  assetName: "endfield-story-CN.zip",
+  requiredFiles: STORY_REQUIRED_FILES,
+};
 
 // ---------------------------------------------------------------------------
 // Zip validation
