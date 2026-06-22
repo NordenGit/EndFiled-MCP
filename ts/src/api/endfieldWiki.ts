@@ -205,11 +205,28 @@ export async function searchWiki(
     params.srwhat = "title";
   }
   const data = (await wikiGet(params)) as {
+    error?: { code?: string; info?: string };
     query?: {
       searchinfo?: { totalhits: number };
       search?: Array<{ title: string; snippet: string }>;
     };
   };
+
+  // Handle API-level errors. endfield.wiki.gg disables title search
+  // (`wgDisableSearchTitle` — returns `search-title-disabled`). Other
+  // errors (rate limit, etc.) surface here too. We throw a Chinese
+  // message so the tool layer can catch and return it as text content.
+  if (data.error) {
+    if (data.error.code === "search-title-disabled") {
+      throw new Error(
+        "endfield.wiki.gg 禁用了标题搜索（srwhat=title）。请改用默认的全文搜索模式（search_mode=\"text\" 或不传该参数）。",
+      );
+    }
+    throw new Error(
+      `Wiki 搜索 API 返回错误：${data.error.info ?? data.error.code ?? "未知错误"}`,
+    );
+  }
+
   const totalHits = data.query?.searchinfo?.totalhits ?? 0;
   const results: SearchResult[] = [];
   for (const item of data.query?.search ?? []) {

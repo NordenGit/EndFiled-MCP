@@ -6,7 +6,73 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Added — v0.1.0 skeleton
+No changes yet.
+
+## [0.3.0] — 2026-06-22 — Creation-oriented tools
+
+### Added
+
+- **Character archives**: `ef_get_character_archives` — returns a character's background-story text (3 sections: basic profile / personnel summary / archive material). Data source: CharacterTable.profileRecord. Rich-text tags (`<@...>`, `<#...>`, `</>`) stripped by cleanProfileText.
+- **Character voices**: `ef_get_character_voices` — returns voice line text with trigger conditions (55-79 lines per character). Data source: CharacterTable.profileVoice.
+- **Story domain** (4 tools): `ef_list_story_chapters` (364 chapters), `ef_list_stories` (scenes within a chapter), `ef_read_story` (full dialogue scene), `ef_search_stories` (full-text search across 9271 scenes). Data source: `endfield-story-CN.zip` (v0.3.0 Release on EndFieldGameData, 19MB).
+- **Story data reader** (`data/story.ts`): catalog (index.json) loads eagerly; conv/ files load on-demand per scene read. Chapter derivation via mission-id prefix grouping. Search via pre-built search.json index.
+- **Character profile reader** (`data/characterProfiles.ts`): archives + voices projection with rich-text cleaning.
+- **Story types** (`data/storyTypes.ts`): StoryLine (dialog/narration/choice), StoryEntry, StoryChapter, StoryScene.
+- **Mirror**: `endfield-story-CN.zip` published as v0.3.0 Release on 3aKHP/EndFieldGameData (9275 files, 19MB).
+- **Build script**: `build-story-zip.ts` for packing story bundle with forward-slash entry names.
+- **Smoke test**: `smoke-creation.ts` for live verification of archives/voices/story tools.
+
+### Changed
+
+- **Character tool surface refactored** to PRTS-MCP three-way split: deleted `ef_get_character_info` (numeric-biased), added `ef_get_character_archives` (story text), `ef_get_character_voices` (voice lines), `ef_get_character_basic_info` (numeric info, renamed from the deleted tool's projection). Matches PRTS-MCP's get_operator_archives / get_operator_voicelines / get_operator_basic_info design.
+- `characters.ts`: extracted `resolveCharacterEntry()` from `getCharacterInfo()` so characterProfiles.ts reuses the same id/CN-name/EN-name lookup.
+- `startupSync.ts`: added STORY_CN dataset sync (own runner, own retry, clearStoryCaches on update).
+- `server.ts`: story store always constructed unconditionally via FallbackStore (matching GameData pattern — never gate binding on directory existence, or background sync data is permanently missed).
+- `datasets.ts`: added STORY_CN ReleaseDatasetSpec.
+- `withGracefulError` extracted to shared `tools/toolRuntime.ts` (was duplicated in gamedataTools + storyTools).
+- Version bumped to 0.3.0 (first public release).
+
+### Fixed
+
+- `cleanProfileText` now strips `<#...>` tag family (870+ i18n values use these status/effect tags), not just `<@...>`. Addresses CR #2 S3.
+- Story conv files parsed with `readJsonInt64Safe` (defensive — conv line `id` fields are int64-sized). Addresses CR #2 S4.
+- `searchStories` caches the 9271-entry key→entry Map at module level instead of rebuilding on every call. Addresses CR #2 S6.
+- Story store bound unconditionally at startup (was gated on directory existence — a regression that would permanently miss background-synced data). Addresses CR #2 B1.
+
+## [0.2.0] — 2026-06-22 — GameData domain
+
+### Added
+
+- **GameData domain**: three new `ef_` tools over the Endfield character table.
+  - `ef_list_characters(lang?)` — 29 characters with resolved names, profession, rarity, charType, department.
+  - `ef_get_character_info(id_or_name, lang?)` — full detail including 4-language CV names.
+  - `ef_search_characters(pattern, max_results?, lang?)` — regex search across names, id, profession, charType, department.
+- **Self-hosted mirror** ([3aKHP/EndFieldGameData](https://github.com/3aKHP/EndFieldGameData)): v0.2.0 Release published with `endfield-tables.zip` (10 core tables + 5 localization languages, 23MB).
+- **Auto-sync** (`data/sync.ts`): GitHub Release sync with cascade fallback (`GITHUB_MIRRORS`), TTL cache, atomic write, offline fallback to cached data. Hash comparison skips download when release tag unchanged.
+- **Bundled fallback** (three-tier availability): `fetch-bundled-data.ts` build-time script populates `ts/data/endfield/`; `server.ts` wires `FallbackStore(primary=synced, fallback=bundled)`; CD pipeline (`.github/workflows/cd.yml`) injects bundled data before npm publish.
+- **i18n resolution layer** (`data/texts.ts`): Endfield separates values from localization — tables store `{id, text}` where `text` is empty and `id` is an int64 hash. This module owns the hash→string lookup across CN/EN/JP/TC/KR.
+- **int64-safe JSON parsing** (`stores.ts:readJsonInt64Safe`): Endfield's localization ids exceed `Number.MAX_SAFE_INTEGER`; plain `JSON.parse` silently truncates them. String-aware preprocessor wraps large integer literals in quotes before parsing.
+- **Character reader** (`data/characters.ts`): list/get/search projections with profession/rarity/charType/weaponType enum mapping and CV resolution.
+- **Sync orchestration** (`startupSync.ts`): single-flight locking, exponential backoff retries (30s/120s/600s), cache-clear cascade on successful refresh.
+- **CD pipeline** (`.github/workflows/cd.yml`): tag-triggered, fetches bundled data → npm publish with provenance.
+- **Build/deploy scripts**: `fetch-bundled-data.ts`, `build-mirror-zip.ts` (forward-slash-enforcing packer), three smoke tests (`smoke-live`/`smoke-gamedata`/`smoke-sync`/`smoke-bundled-fallback`).
+- **Tests**: +24 (8 int64-safe parsing, 16 character reader). Total 90/90.
+
+### Changed
+
+- `server.ts` version bumped to `0.2.0-dev.0`; binds text store before character store (dependency order); builds FallbackStore based on which data directories exist.
+- `startupSync.ts` is no longer a no-op — real implementation with single-flight + retry + cache clearing.
+- `.gitignore`: replaced stale PRTS-MCP entries (`gamedata/`, `storyjson/`) with Endfield-specific rules.
+
+### Fixed
+
+- `parseInt64Safe` rewritten to be string-aware (numbers inside JSON string values are no longer corrupted), unbounded digit length (20+ digit literals no longer produce invalid JSON), and float-safe (numbers with `.` or exponent are skipped). Addresses CR #1 B1+B2.
+- `startupSync.ts` now calls `clearTextCaches()` + `clearCharacterCaches()` after a successful background refresh. Previously stale data was served until process restart. Addresses CR #1 B3.
+- `texts.ts:loadLanguageIndex` uses `readJsonInt64Safe` instead of `readJson` for defense-in-depth against future i18n key format changes. Addresses CR #1 B4.
+
+## [0.1.0] — 2026-06-22 — Skeleton
+
+### Added
 
 Initial project skeleton. End-to-end working Wiki MVP, no GameData domain
 yet.
