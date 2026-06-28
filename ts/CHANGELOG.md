@@ -6,7 +6,9 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-No changes yet.
+### Fixed
+
+- `ef_search_characters` now caps `pattern` at 200 characters (ReDoS hardening), aligning with `ef_search_stories`. Previously only the story tool enforced the limit.
 
 ## [0.3.0] — 2026-06-22 — Creation-oriented tools
 
