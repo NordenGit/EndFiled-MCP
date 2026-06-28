@@ -15,9 +15,9 @@ An MCP Server for [*Arknights: Endfield*](https://endfield.hypergryph.com/) fan 
 
 This is the sibling project of [PRTS-MCP](https://github.com/3aKHP/prts-mcp) (for the original *Arknights*). Same architecture philosophy, modernized to a single TypeScript implementation on Bun — one codebase covers both the local stdio transport (Claude Desktop) and the remote Streamable HTTP transport (shared servers).
 
-### Current Status (`0.1.0-dev.0`)
+### Current Status (`0.3.1`)
 
-Skeleton release. The 6 Wiki tools below are end-to-end working and verified against the live wiki; the GameData domain (characters, items, stages, enemies) arrives in `0.2.0` via a self-hosted mirror.
+15 tools across three domains — 6 Wiki, 5 Character, 4 Story — all end-to-end working and verified. GameData (characters, story) is served from a self-hosted mirror with auto-sync + bundled offline fallback.
 
 | Tool | Description |
 |------|-------------|
@@ -27,6 +27,15 @@ Skeleton release. The 6 Wiki tools below are end-to-end working and verified aga
 | `ef_get_wiki_categories(page_title)` | Category tags for a page |
 | `ef_get_wiki_links(page_title, direction?, limit?)` | Outbound links or inbound backlinks |
 | `ef_get_wiki_template(page_title)` | Structured template data (key-value pairs) |
+| `ef_list_characters(lang?)` | List all characters with resolved names/profession/rarity |
+| `ef_search_characters(pattern, max_results?, lang?)` | Regex search across character fields |
+| `ef_get_character_archives(char_id)` | Character background-story text (3 sections) |
+| `ef_get_character_voices(char_id)` | Character voice lines with trigger conditions |
+| `ef_get_character_basic_info(char_id)` | Character numeric info (profession/rarity/CV/etc.) |
+| `ef_list_story_chapters()` | Story chapter list (364 chapters) |
+| `ef_list_stories(chapter_id)` | Scenes within a story chapter |
+| `ef_read_story(story_key)` | Full dialogue scene text |
+| `ef_search_stories(pattern, max_results?)` | Full-text search across 9271 story scenes |
 
 Wiki content is in English (the wiki's primary language). Tool descriptions are in Chinese. The calling LLM bridges the content language as needed.
 
@@ -131,9 +140,9 @@ Or use the all-in-one audit:
 
 本项目是 [PRTS-MCP](https://github.com/3aKHP/prts-mcp)（明日方舟本体的姊妹项目）的兄弟项目。相同的架构哲学，但简化为基于 Bun 的单 TypeScript 实现——一套代码同时覆盖本地 stdio 传输（Claude Desktop）和远程 Streamable HTTP 传输（共享服务器）。
 
-### 当前状态（`0.1.0-dev.0`）
+### 当前状态（`0.3.1`）
 
-骨架版本。下列 6 个 Wiki 工具已端到端跑通并通过真实 wiki 验证；角色 / 物品 / 关卡 / 敌人等 GameData 域在 `0.2.0` 通过自建镜像接入。
+15 个工具覆盖三个域——6 个 Wiki、5 个角色、4 个剧情——全部端到端跑通并验证。GameData（角色 / 剧情）由自建镜像提供，支持自动同步 + bundled 离线兜底。
 
 | 工具 | 说明 |
 |------|------|
@@ -143,6 +152,15 @@ Or use the all-in-one audit:
 | `ef_get_wiki_categories(page_title)` | 获取词条的分类标签 |
 | `ef_get_wiki_links(page_title, direction?, limit?)` | 获取词条的出链或入链 |
 | `ef_get_wiki_template(page_title)` | 提取词条中的结构化模板数据 |
+| `ef_list_characters(lang?)` | 列出全部角色（含名称/职业/稀有度） |
+| `ef_search_characters(pattern, max_results?, lang?)` | 跨角色字段正则搜索 |
+| `ef_get_character_archives(char_id)` | 角色背景故事文本（3 段档案） |
+| `ef_get_character_voices(char_id)` | 角色语音台词（含触发条件） |
+| `ef_get_character_basic_info(char_id)` | 角色数值信息（职业/稀有度/CV 等） |
+| `ef_list_story_chapters()` | 剧情章节列表（364 章） |
+| `ef_list_stories(chapter_id)` | 章节内的剧情场景列表 |
+| `ef_read_story(story_key)` | 完整剧情对话场景文本 |
+| `ef_search_stories(pattern, max_results?)` | 跨 9271 个剧情场景全文检索 |
 
 Wiki 内容以英文为主（站点的主语言），工具描述使用中文。内容由调用方 LLM 负责桥接语言。
 

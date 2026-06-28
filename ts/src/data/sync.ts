@@ -40,7 +40,10 @@ import { parseMirrors } from "../config.js";
 // Constants
 // ---------------------------------------------------------------------------
 
-const GITHUB_UA = "Endfield-MCP-Bot/0.1 (Arknights: Endfield fan-creation helper)";
+// Version here is intentionally a coarse literal (major.minor), not derived
+// from SERVER_VERSION: data/ must not depend on the upper server layer, and
+// a precise patch version in a UA adds no value. Bump manually on minor+.
+const GITHUB_UA = "Endfield-MCP-Bot/0.3 (Arknights: Endfield fan-creation helper)";
 
 /** Skip the upstream tag check if cached data is fresher than this (seconds). */
 const CACHE_TTL_SECONDS = 3600;
