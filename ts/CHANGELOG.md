@@ -8,6 +8,63 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 No changes yet.
 
+## [0.3.2] — 2026-06-29 — Code-debt cleanup & tool-description polish
+
+### Changed
+
+- **Improved tool descriptions for better client-side tool selection (RAG
+  recall).** All 15 `ef_*` tool descriptions were revised under three
+  principles: (1) added reverse-anchor "适用场景" (when-to-use) cues so the
+  calling LLM can pick the right tool from a natural-language user request;
+  (2) de-duplicated the `ef_get_character_archives` / `ef_get_character_voices`
+  / `ef_get_character_basic_info` opening lines, which previously all began
+  "获取指定角色的…" and diluted each other's embedding similarity; (3)
+  preserved and tightened the existing search→read workflow guidance.
+  Description text only — parameter schemas and handler logic unchanged.
+
+- **Unified `{id, text}` localization type across the character domain**:
+  `texts.ts`'s exported `LocalizedText` is now the single canonical type for
+  every `{id, text}` localization ref. Removed three file-private duplicates:
+  `characterProfiles.ts`'s `RecordField` (and its four `as LocalizedText`
+  casts at the `resolveText()` call sites), plus `characterTable.ts`'s
+  `LocalizedField` (used by `CharacterEntry.name`) and `CvField` (used by the
+  four `cvName.*` CV fields). Pure type-layer change; runtime behaviour and
+  output are unchanged. Resolves the type-duplication debt item in STATUS.md.
+  (#13)
+
+### Decisions
+
+- **Evaluated and declined `characterEnums.ts` enum dynamization (wontfix).**
+  The sibling debt item — making the three profession/charType/weaponType name
+  maps dynamic instead of hardcoded — was investigated and closed as
+  wontfix. Profession and charType have source tables in the mirror
+  (`CharProfessionTable` / `CharTypeTable`), but (1) the enum values are
+  verified constants that rarely change across game updates (profession /
+  attribute / weapon-type are base design, not tuning data); (2) the only real
+  benefit of dynamization would be multilingual profession/attribute names,
+  which the current tools don't need since they always output Chinese (YAGNI);
+  (3) `weaponType` has no source table (the mirror ships `EquipTable` only),
+  so dynamization would leave a mixed hardcoded/dynamic shape breaking the
+  module's single responsibility; (4) dynamizing would force a deliberately
+  pure-data module to take a store dependency, against the layering intent it
+  was split out for. The hardcoded maps are the reasonable terminal state.
+  Revisit if future character tools gain a `lang` option that needs localized
+  profession names.
+
+- **Deferred standardized pagination `{total, offset, limit, items}` and
+  structured errors `{error_code, message}` to the 2.0-boundary output-format
+  strategy.** Both items were drafted into the 0.3.2 patch line assuming a
+  structured-JSON output model, but the project evolved toward markdown text
+  content (which is friendlier to the LLM consumers MCP targets). Forcing
+  them in now would (a) touch the output format — a 1.0-compatibility surface
+  — piecemeal rather than as a coherent strategy, and (b) for structured
+  errors, likely *reduce* LLM-friendliness (error codes need a second lookup
+  that natural-language Chinese messages don't). Current list sizes (~29
+  characters, a few dozen chapters) don't overflow context, so pagination has
+  no present payoff. Both belong with the 2.0-boundary `output_format=
+  markdown|json` selector decision (ROADMAP.md), not scattered individual-tool
+  changes now.
+
 ## [0.3.1] — 2026-06-29 — Tech-debt cleanup
 
 ### Added
