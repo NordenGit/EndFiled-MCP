@@ -26,6 +26,14 @@ import { createLogger } from "../utils/log.js";
 export interface HttpOptions {
   port: number;
   host: string;
+  /**
+   * Install fingerprint echoed by /health as `id`.
+   *
+   * Set by the shared-stdio host so a probing sibling can tell our host
+   * apart from an unrelated service that happens to hold the port. Unset
+   * for the plain HTTP transport, where /health stays a bare liveness probe.
+   */
+  identity?: string;
 }
 
 const log = createLogger("ef.http");
@@ -76,9 +84,15 @@ export async function runHttp(
 ): Promise<void> {
   const handler = createServerFactory(serverFactory);
 
-  // Pre-bind a reusable health-check Response.
+  // Body is fixed for the lifetime of the server, so serialize it once; the
+  // Response itself must still be per-call, since a body can only be read once.
+  const healthBody = JSON.stringify(
+    opts.identity === undefined
+      ? { status: "ok" }
+      : { status: "ok", id: opts.identity },
+  );
   const healthResponse = () =>
-    new Response(JSON.stringify({ status: "ok" }), {
+    new Response(healthBody, {
       headers: { "content-type": "application/json" },
     });
 

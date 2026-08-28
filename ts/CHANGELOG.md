@@ -6,7 +6,27 @@ versioning follows [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-No changes yet.
+### Changed
+
+- **stdio clients now share one loaded dataset.** stdio spawns one server
+  per client, so every Claude Desktop window and Claude Code session used to
+  parse its own copy of the same tables — three clients meant three full
+  datasets in memory. The first process to start now becomes the host: it
+  loads the data and additionally listens on a loopback port, and later
+  processes bridge their stdin/stdout to it without loading anything. The
+  election is the port bind itself, so there is no lockfile, no daemon and
+  no orphan; a client that loses the race re-probes and bridges instead.
+  The port is derived from a fingerprint of version + data paths + user, so
+  separate checkouts, versions and users never share a process, and the host
+  binds `127.0.0.1` only. Set `EF_SHARE=0` for the previous behaviour.
+- **`parseInt64Safe` no longer copies the document it scans.** It appended
+  one character at a time, so a 10 MB table cost ~10M string concatenations
+  and the intermediate ropes dwarfed the parsed result. It now scans without
+  copying and splices only around the integers it actually rewrites,
+  returning the original string untouched when nothing needs rewriting.
+  Measured on a single `ef_list_characters` call: 851 MB → 335 MB resident.
+  Behaviour is unchanged — `tests/storesInt64Equivalence.test.ts` checks the
+  new scanner against the original implementation on randomized documents.
 
 ## [0.4.0] — 2026-06-29 — Worldbuilding (PRTS archive & in-game wiki)
 

@@ -101,6 +101,7 @@ EF_TRANSPORT=http PORT=3000 bun run src/server.ts
 |----------|---------|---------|---------|
 | `EF_TRANSPORT` | `stdio` | `stdio` \| `http` | Transport selection |
 | `EF_DATA_PATH` | per-user data dir | absolute path | GameData location (setting this disables auto-sync) |
+| `EF_SHARE` | `1` | `1` \| `0` | Share one loaded dataset across stdio clients (`0` gives every client its own process) |
 | `EF_WIKI_ENDPOINT` | `https://endfield.wiki.gg/api.php` | URL | Wiki API URL override |
 | `EF_WIKI_UA` | Chrome-style UA | string | User-Agent for wiki requests (WAF may reject bare bots) |
 | `EF_WIKI_REFERER` | `https://endfield.wiki.gg/` | URL | Referer for wiki requests |
@@ -226,6 +227,7 @@ EF_TRANSPORT=http PORT=3000 bun run src/server.ts
 |------|--------|------|------|
 | `EF_TRANSPORT` | `stdio` | `stdio` \| `http` | 传输方式选择 |
 | `EF_DATA_PATH` | 用户目录 | 绝对路径 | GameData 路径（设置后禁用自动同步） |
+| `EF_SHARE` | `1` | `1` \| `0` | 多个 stdio 客户端共享同一份已加载数据（`0` 则每个客户端独立进程） |
 | `EF_WIKI_ENDPOINT` | `https://endfield.wiki.gg/api.php` | URL | Wiki API 地址覆盖 |
 | `EF_WIKI_UA` | Chrome 风格 UA | 字符串 | Wiki 请求的 User-Agent（WAF 可能拒绝裸 bot） |
 | `EF_WIKI_REFERER` | `https://endfield.wiki.gg/` | URL | Wiki 请求的 Referer |

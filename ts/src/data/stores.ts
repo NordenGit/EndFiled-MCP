@@ -67,30 +67,33 @@ export interface JsonStore {
  * way to be correct without a full JSON tokenizer.
  */
 function parseInt64Safe(text: string): string {
-  // We build the output character-by-character. This is O(n) and allocates
-  // one string; the alternative (regex with string-skip) can't be made
-  // correct without variable-width lookbehind, which JS doesn't support.
-  let out = "";
+  // Only oversized integers are ever rewritten; every other byte is copied
+  // verbatim. So copy nothing until the first rewrite actually happens:
+  // `cursor` trails the last emitted offset, `chunks` stays empty until
+  // then, and a file needing no rewrite at all returns the original string
+  // having allocated nothing.
+  //
+  // The previous implementation appended one character at a time. On a
+  // 10 MB table that is ~10M string concatenations, and the intermediate
+  // ropes dwarfed the parsed result: loading one language drove the
+  // process several hundred MB above its resting size.
+  const chunks: string[] = [];
+  let cursor = 0;
   let i = 0;
   const len = text.length;
 
   while (i < len) {
     const ch = text[i]!;
 
-    // String literal: copy verbatim until the closing unescaped quote.
+    // String literal: nothing inside is ever rewritten, so skip to the
+    // closing unescaped quote without copying.
     if (ch === '"') {
-      out += ch;
       i++;
       while (i < len) {
         const s = text[i]!;
-        out += s;
         i++;
         if (s === "\\") {
-          // Escaped char — copy the next char too, whatever it is.
-          if (i < len) {
-            out += text[i]!;
-            i++;
-          }
+          i++; // escaped char — consume it too
         } else if (s === '"') {
           break;
         }
@@ -111,16 +114,16 @@ function parseInt64Safe(text: string): string {
       const structural = j < 0 ? "{" : text[j]!; // start-of-text acts like object start
       if (structural === ":" || structural === "," || structural === "[" || structural === "{") {
         // Capture the full numeric token: sign + digits.
-        let numStart = i;
+        const numStart = i;
         if (text[i] === "-" || text[i] === "+") i++;
         const digitStart = i;
-        while (i < len && text[i] >= "0" && text[i] <= "9") i++;
+        while (i < len && text[i]! >= "0" && text[i]! <= "9") i++;
         const digitCount = i - digitStart;
 
         // Skip floats entirely: a `.` or exponent means this isn't an int.
+        // Leaving it verbatim lets the main loop handle the fractional part.
         if (i < len && (text[i] === "." || text[i] === "e" || text[i] === "E")) {
-          out += text.substring(numStart, i);
-          continue; // let the main loop handle the fractional part
+          continue;
         }
 
         if (digitCount >= 15) {
@@ -130,20 +133,20 @@ function parseInt64Safe(text: string): string {
             n > BigInt(Number.MAX_SAFE_INTEGER) ||
             n < BigInt(-Number.MAX_SAFE_INTEGER)
           ) {
-            out += `"${digits}"`;
-            continue;
+            chunks.push(text.slice(cursor, numStart), '"', digits, '"');
+            cursor = i;
           }
         }
-        out += text.substring(numStart, i);
         continue;
       }
     }
 
-    out += ch;
     i++;
   }
 
-  return out;
+  if (chunks.length === 0) return text;
+  chunks.push(text.slice(cursor));
+  return chunks.join("");
 }
 
 function normalizePath(path: string): string {

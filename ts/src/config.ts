@@ -119,6 +119,13 @@ export interface Config {
   httpPort: number;
   /** HTTP host (when transport == "http"). */
   httpHost: string;
+  /**
+   * Share one data-loading process across stdio clients (EF_SHARE != "0").
+   *
+   * On by default. Disable to give every client its own fully loaded
+   * process — costlier in memory, but independent.
+   */
+  share: boolean;
   /** Mirror URL cascade for GitHub-style asset downloads. */
   githubMirrors: string[];
 }
@@ -139,6 +146,7 @@ export function loadConfig(): Config {
     transport: resolveTransport(),
     httpPort: Number(process.env["PORT"] ?? 3000),
     httpHost: process.env["HOST"] ?? "0.0.0.0",
+    share: process.env["EF_SHARE"] !== "0",
     githubMirrors: parseMirrors(process.env["GITHUB_MIRRORS"] ?? ""),
   };
 }

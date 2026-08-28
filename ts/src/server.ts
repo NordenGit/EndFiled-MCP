@@ -17,9 +17,10 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import pkg from "../package.json" with { type: "json" };
-import { loadConfig } from "./config.js";
+import { loadConfig, type Config } from "./config.js";
 import { createLogger } from "./utils/log.js";
 import { bindWikiConfig } from "./api/endfieldWiki.js";
 import { registerWikiTools } from "./tools/wikiTools.js";
@@ -34,6 +35,7 @@ import { DirectoryStore, FallbackStore, type JsonStore } from "./data/stores.js"
 import { runStartupSync } from "./startupSync.js";
 import { runStdio } from "./transports/stdio.js";
 import { runHttp } from "./transports/http.js";
+import { fingerprint, runSharedStdio } from "./transports/shared.js";
 
 // ---------------------------------------------------------------------------
 // Logging + version
@@ -72,14 +74,15 @@ function createMcpServer(): McpServer {
   return server;
 }
 
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
-async function main(): Promise<void> {
-  const cfg = loadConfig();
-  bindWikiConfig(cfg);
-
+/**
+ * Bind every data store and kick off mirror sync.
+ *
+ * Split out of main() because it must run in exactly one process per
+ * install: the shared-stdio host calls it, bridges never do. Binding is
+ * pure assignment — the expensive JSON parsing is lazy, on first tool
+ * call — so this is cheap to run and cheap to skip.
+ */
+function initDataLayer(cfg: Config): void {
   // Build the GameData store as a two-layer FallbackStore:
   //   primary  = auto-sync directory (cfg.dataPath, freshest when present)
   //   fallback = bundled directory  (cfg.bundledDataPath, ships with the
@@ -169,11 +172,6 @@ async function main(): Promise<void> {
     );
   }
 
-  log(
-    "INFO",
-    `Endfield-MCP ${SERVER_VERSION} starting (transport=${cfg.transport}, wiki=${cfg.wikiEndpoint})`,
-  );
-
   // Fire-and-forget. In v0.1 this is a no-op; in v0.2+ the background
   // thread handles mirror sync without blocking server startup.
   void runStartupSync().catch((err: unknown) => {
@@ -182,15 +180,46 @@ async function main(): Promise<void> {
       `Startup sync threw unexpectedly: ${err instanceof Error ? err.message : String(err)}`,
     );
   });
+}
+
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const cfg = loadConfig();
+  bindWikiConfig(cfg);
+
+  log(
+    "INFO",
+    `Endfield-MCP ${SERVER_VERSION} starting (transport=${cfg.transport}, wiki=${cfg.wikiEndpoint})`,
+  );
 
   if (cfg.transport === "http") {
+    initDataLayer(cfg);
     await runHttp(createMcpServer, {
       port: cfg.httpPort,
       host: cfg.httpHost,
     });
-  } else {
-    await runStdio(createMcpServer());
+    return;
   }
+
+  if (!cfg.share) {
+    initDataLayer(cfg);
+    await runStdio(createMcpServer());
+    return;
+  }
+
+  // Share one loaded dataset across every stdio client of this install.
+  // Version and paths belong to the identity so a different checkout, a
+  // different data directory or a different user never joins our host.
+  await runSharedStdio({
+    fp: fingerprint(
+      ["endfield-mcp", SERVER_VERSION, homedir(), cfg.dataPath, cfg.bundledDataPath].join("|"),
+    ),
+    createMcpServer,
+    initHost: () => initDataLayer(cfg),
+  });
 }
 
 main().catch((err: unknown) => {
